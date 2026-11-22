@@ -3,3 +3,5 @@ ui/build/*
 !ui/build/.gitkeep
 ui/node_modules
 ui/.svelte-kit
+worldhopper
+*.test
