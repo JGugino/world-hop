@@ -103,7 +103,7 @@ func New(cfg Config, tokens oauth.TokenStore, stateDir string) *Manager {
 			GoogleDrive: {
 				id: GoogleDrive, name: "Google Drive",
 				configured: cfg.GoogleClientID != "",
-				hint:       "set WORLDHOP_GOOGLE_CLIENT_ID",
+				hint:       "WORLDHOP_GOOGLE_CLIENT_ID",
 				oauth: oauth.Config{
 					ClientID: cfg.GoogleClientID, ClientSecret: cfg.GoogleClientSecret,
 					AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
@@ -117,7 +117,7 @@ func New(cfg Config, tokens oauth.TokenStore, stateDir string) *Manager {
 			Dropbox: {
 				id: Dropbox, name: "Dropbox",
 				configured: cfg.DropboxAppKey != "",
-				hint:       "set WORLDHOP_DROPBOX_APP_KEY",
+				hint:       "WORLDHOP_DROPBOX_APP_KEY",
 				oauth: oauth.Config{
 					ClientID: cfg.DropboxAppKey,
 					AuthURL:  "https://www.dropbox.com/oauth2/authorize",
@@ -218,7 +218,7 @@ func (m *Manager) StartLink(id string) (string, error) {
 		return "", ErrUnknownProvider
 	}
 	if !p.configured {
-		return "", fmt.Errorf("%w (%s)", ErrNotConfigured, p.hint)
+		return "", &NotConfiguredError{Provider: p.name, Hint: p.hint}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -378,3 +378,15 @@ func (m *Manager) ListManifests(ctx context.Context, world string) ([]string, er
 	l, err := s.ListManifests(ctx, world)
 	return l, m.wrap(id, err)
 }
+
+// NotConfiguredError means this build has no OAuth client ID for the provider.
+// Its message is aimed at developers: end users of a release build never see it.
+type NotConfiguredError struct{ Provider, Hint string }
+
+func (e *NotConfiguredError) Error() string {
+	return fmt.Sprintf("%s sign-in is not set up in this build: no OAuth client ID was compiled in. "+
+		"Release builds include one (see docs/cloud-setup.md); for a development build set %s or add it to cloud.json",
+		e.Provider, e.Hint)
+}
+
+func (e *NotConfiguredError) Is(target error) bool { return target == ErrNotConfigured }
