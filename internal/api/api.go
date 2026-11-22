@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	stdsync "sync/atomic"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 type Server struct {
 	svc    *sync.Runner
+	deps   Deps
 	assets fs.FS
 	ln     net.Listener
 	srv    *http.Server
@@ -24,18 +26,15 @@ type Server struct {
 	// (POST /api/bye). The page may just be reloading, so callers should wait
 	// a grace period and check LastActivity before acting on it.
 	OnClosed func()
-
-	// Cloud serves /api/cloud/*; nil answers 503.
-	Cloud Cloud
 }
 
 // New listens on 127.0.0.1 (port 0 picks a free port unless addr says otherwise).
-func New(addr string, svc *sync.Runner, assets fs.FS) (*Server, error) {
+func New(addr string, svc *sync.Runner, assets fs.FS, deps Deps) (*Server, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{svc: svc, assets: assets, ln: ln}
+	s := &Server{svc: svc, deps: deps, assets: assets, ln: ln}
 	s.last.Store(time.Now().UnixNano())
 	h := s.Handler()
 	s.srv = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +58,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	s.cloudRoutes(mux)
+	s.routes(mux)
 	mux.Handle("/", s.static())
 	return hostGuard(mux)
 }
@@ -75,6 +74,17 @@ func hostGuard(next http.Handler) http.Handler {
 		if host != "127.0.0.1" && host != "localhost" {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
+		}
+		// State-changing requests must come from our own page: a cross-origin
+		// page could otherwise POST to the loopback port.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if o := r.Header.Get("Origin"); o != "" {
+				u, err := url.Parse(o)
+				if err != nil || u.Host != r.Host {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
+			}
 		}
 		next.ServeHTTP(w, r)
 	})

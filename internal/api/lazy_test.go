@@ -10,7 +10,7 @@ import (
 )
 
 func TestLazyStartsOnDemandAndStopsIdle(t *testing.T) {
-	l := NewLazy("127.0.0.1:0", wsync.NewRunner("t", nil, nil), fstest.MapFS{"index.html": {Data: []byte("hi")}}, 200*time.Millisecond)
+	l := NewLazy("127.0.0.1:0", wsync.NewRunner("t", nil, nil), fstest.MapFS{"index.html": {Data: []byte("hi")}}, Deps{}, 200*time.Millisecond)
 	if l.Running() {
 		t.Fatal("server running before Ensure")
 	}
@@ -47,7 +47,7 @@ func TestLazyStartsOnDemandAndStopsIdle(t *testing.T) {
 }
 
 func TestLazyStopsAfterViewClosed(t *testing.T) {
-	l := NewLazy("127.0.0.1:0", wsync.NewRunner("t", nil, nil), fstest.MapFS{"index.html": {Data: []byte("hi")}}, time.Hour)
+	l := NewLazy("127.0.0.1:0", wsync.NewRunner("t", nil, nil), fstest.MapFS{"index.html": {Data: []byte("hi")}}, Deps{}, time.Hour)
 	l.grace = 150 * time.Millisecond
 	post := func(url string) {
 		resp, err := http.Post(url+"api/bye", "text/plain", nil)

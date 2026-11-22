@@ -17,24 +17,22 @@ const closeGrace = 5 * time.Second
 type Lazy struct {
 	addr   string
 	svc    *wsync.Runner
+	deps   Deps
 	assets fs.FS
 	idle   time.Duration
 	tick   time.Duration
 	grace  time.Duration // wait after the UI says it closed, to survive reloads
 
-	// Cloud, if set before Ensure, is given to each server started.
-	Cloud Cloud
-
 	mu  sync.Mutex
 	cur *Server
 }
 
-func NewLazy(addr string, svc *wsync.Runner, assets fs.FS, idle time.Duration) *Lazy {
+func NewLazy(addr string, svc *wsync.Runner, assets fs.FS, deps Deps, idle time.Duration) *Lazy {
 	tick := idle / 4
 	if tick <= 0 {
 		tick = time.Second
 	}
-	return &Lazy{addr: addr, svc: svc, assets: assets, idle: idle, tick: tick, grace: closeGrace}
+	return &Lazy{addr: addr, svc: svc, deps: deps, assets: assets, idle: idle, tick: tick, grace: closeGrace}
 }
 
 // Ensure returns the URL of the running server, starting one (on a free
@@ -45,11 +43,10 @@ func (l *Lazy) Ensure() (string, error) {
 	if l.cur != nil {
 		return l.cur.URL(), nil
 	}
-	srv, err := New(l.addr, l.svc, l.assets)
+	srv, err := New(l.addr, l.svc, l.assets, l.deps)
 	if err != nil {
 		return "", err
 	}
-	srv.Cloud = l.Cloud
 	l.cur = srv
 	srv.OnClosed = func() { l.closeSoon(srv) }
 	go func() {

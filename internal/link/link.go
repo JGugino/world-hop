@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	stdsync "sync"
 
 	"github.com/JGugino/world-hopper/internal/httpx"
@@ -173,11 +172,7 @@ func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	st := Status{Chosen: m.chosen, Error: m.lastErr}
-	var ids []string
-	for id := range m.providers {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
+	ids := []string{GoogleDrive, Dropbox}
 	for _, id := range ids {
 		p := m.providers[id]
 		st.Providers = append(st.Providers, ProviderStatus{ID: id, Name: p.name, Configured: p.configured, Linked: m.linked(id)})

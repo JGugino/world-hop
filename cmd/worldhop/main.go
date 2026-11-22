@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/JGugino/world-hopper/internal/api"
+	"github.com/JGugino/world-hopper/internal/config"
 	"github.com/JGugino/world-hopper/internal/detect"
 	"github.com/JGugino/world-hopper/internal/link"
 	"github.com/JGugino/world-hopper/internal/oauth"
@@ -47,11 +48,11 @@ func main() {
 
 	sd := *stateDir
 	if sd == "" {
-		cfg, err := os.UserConfigDir()
+		cfgDir, err := os.UserConfigDir()
 		if err != nil {
 			log.Fatal(err)
 		}
-		sd = filepath.Join(cfg, "worldhop")
+		sd = filepath.Join(cfgDir, "worldhop")
 	}
 	// -store picks a plain shared folder; otherwise syncing goes through the
 	// user's linked Google Drive or Dropbox account.
@@ -72,22 +73,38 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// Sources are re-resolved on every sync so new worlds are picked up.
-	// With none given, fall back to the known launcher locations.
-	var sources []worlds.Source
+
+	// Sources live in a config file the UI edits. On first run, seed it with the
+	// launcher folders that exist on this computer; -saves / -world add more.
+	cfg, fresh, err := config.Load(filepath.Join(sd, "config.json"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	if fresh {
+		home, _ := os.UserHomeDir()
+		var found []worlds.Source
+		for _, s := range worlds.DefaultSources(runtime.GOOS, home, os.Getenv("APPDATA")) {
+			if st, err := os.Stat(s.Path); err == nil && st.IsDir() {
+				found = append(found, s)
+			}
+		}
+		if err := cfg.Seed(found); err != nil {
+			log.Printf("save config: %v", err)
+		}
+	}
+	var flagged []worlds.Source
 	for _, p := range savesDirs {
-		sources = append(sources, worlds.Source{Kind: worlds.KindSaves, Path: p})
+		flagged = append(flagged, worlds.Source{Kind: worlds.KindSaves, Path: p})
 	}
 	for _, p := range worldDirs {
-		sources = append(sources, worlds.Source{Kind: worlds.KindWorld, Path: p})
+		flagged = append(flagged, worlds.Source{Kind: worlds.KindWorld, Path: p})
 	}
+	if err := cfg.Seed(flagged); err != nil {
+		log.Printf("save config: %v", err)
+	}
+	// Re-resolved on every sync so new worlds and edits to the list are picked up.
 	listWorlds := func() []worlds.World {
-		src := sources
-		if len(src) == 0 {
-			home, _ := os.UserHomeDir()
-			src = worlds.DefaultSources(runtime.GOOS, home, os.Getenv("APPDATA"))
-		}
-		ws, problems := worlds.Resolve(src)
+		ws, problems := worlds.Resolve(cfg.Sources())
 		for _, p := range problems {
 			log.Printf("source: %v", p)
 		}
@@ -98,10 +115,11 @@ func main() {
 	svc := sync.NewRunner(version, engine, listWorlds)
 	// The HTTP server is started on demand (Open Web View) and stopped again after
 	// idleTimeout without requests, so nothing listens while the UI isn't in use.
-	lazy := api.NewLazy(*addr, svc, ui.Assets(), idleTimeout)
+	var providers api.Providers = api.StubProviders{} // -store mode has no cloud accounts
 	if cloud != nil {
-		lazy.Cloud = cloud
+		providers = link.API{M: cloud}
 	}
+	lazy := api.NewLazy(*addr, svc, ui.Assets(), api.Deps{Sources: cfg, Providers: providers}, idleTimeout)
 
 	openView := func() {
 		url, err := lazy.Ensure()
