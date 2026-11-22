@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/JGugino/world-hopper/internal/store"
+	"github.com/JGugino/world-hopper/internal/store/storetest"
 )
 
 func TestWriteOnceManifestsAndPacks(t *testing.T) {
@@ -41,4 +42,8 @@ func TestWriteOnceManifestsAndPacks(t *testing.T) {
 	if err := d.PutPack(ctx, "../../etc", nil); err == nil {
 		t.Fatal("accepted bad pack name")
 	}
+}
+
+func TestContract(t *testing.T) {
+	storetest.Contract(t, New(t.TempDir()))
 }

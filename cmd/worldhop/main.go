@@ -13,6 +13,9 @@ import (
 	"github.com/JGugino/world-hopper/internal/api"
 	"github.com/JGugino/world-hopper/internal/config"
 	"github.com/JGugino/world-hopper/internal/detect"
+	"github.com/JGugino/world-hopper/internal/link"
+	"github.com/JGugino/world-hopper/internal/oauth"
+	"github.com/JGugino/world-hopper/internal/store"
 	"github.com/JGugino/world-hopper/internal/store/localdir"
 	"github.com/JGugino/world-hopper/internal/sync"
 	"github.com/JGugino/world-hopper/internal/tray"
@@ -51,12 +54,24 @@ func main() {
 		}
 		sd = filepath.Join(cfgDir, "worldhop")
 	}
-	var engine *sync.Engine
+	// -store picks a plain shared folder; otherwise syncing goes through the
+	// user's linked Google Drive or Dropbox account.
+	var cloud *link.Manager
+	var st store.Store
 	if *storeDir != "" {
-		var err error
-		if engine, err = sync.New(localdir.New(*storeDir), sd); err != nil {
+		st = localdir.New(*storeDir)
+	} else {
+		ccfg, err := link.LoadConfig(sd)
+		if err != nil {
 			log.Fatal(err)
 		}
+		cloud = link.New(ccfg, oauth.KeyringStore{Service: "worldhop"}, sd)
+		cloud.OpenURL = window.OpenBrowser
+		st = cloud
+	}
+	engine, err := sync.New(st, sd)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// Sources live in a config file the UI edits. On first run, seed it with the
@@ -96,13 +111,15 @@ func main() {
 		return ws
 	}
 	det := detect.New()
-	if engine != nil {
-		engine.IsOpen = det.WorldOpen
-	}
+	engine.IsOpen = det.WorldOpen
 	svc := sync.NewRunner(version, engine, listWorlds)
 	// The HTTP server is started on demand (Open Web View) and stopped again after
 	// idleTimeout without requests, so nothing listens while the UI isn't in use.
-	lazy := api.NewLazy(*addr, svc, ui.Assets(), api.Deps{Sources: cfg, Providers: api.StubProviders{}}, idleTimeout)
+	var providers api.Providers = api.StubProviders{} // -store mode has no cloud accounts
+	if cloud != nil {
+		providers = link.API{M: cloud}
+	}
+	lazy := api.NewLazy(*addr, svc, ui.Assets(), api.Deps{Sources: cfg, Providers: providers}, idleTimeout)
 
 	openView := func() {
 		url, err := lazy.Ensure()
