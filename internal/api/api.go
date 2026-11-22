@@ -19,6 +19,11 @@ type Server struct {
 	ln     net.Listener
 	srv    *http.Server
 	last   stdsync.Int64 // unix nanos of the last request
+
+	// OnClosed, if set, is called when the UI reports its page is closing
+	// (POST /api/bye). The page may just be reloading, so callers should wait
+	// a grace period and check LastActivity before acting on it.
+	OnClosed func()
 }
 
 // New listens on 127.0.0.1 (port 0 picks a free port unless addr says otherwise).
@@ -44,6 +49,12 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("POST /api/sync", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, s.svc.ForceSync(r.Context()))
+	})
+	mux.HandleFunc("POST /api/bye", func(w http.ResponseWriter, r *http.Request) {
+		if s.OnClosed != nil {
+			s.OnClosed()
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.Handle("/", s.static())
 	return hostGuard(mux)

@@ -61,7 +61,7 @@ func main() {
 			log.Printf("start web server: %v", err)
 			return
 		}
-		if err := window.Open(url); err != nil {
+		if err := window.Open(url, lazy.CloseNow); err != nil {
 			log.Printf("open view: %v", err)
 		}
 	}
