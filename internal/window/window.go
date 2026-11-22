@@ -8,6 +8,9 @@ import (
 	"runtime"
 )
 
+// OpenBrowser opens url in the default browser.
+func OpenBrowser(url string) error { return openBrowser(url) }
+
 // openBrowser opens url in the default browser.
 func openBrowser(url string) error {
 	switch runtime.GOOS {

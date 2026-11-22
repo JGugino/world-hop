@@ -12,6 +12,9 @@ import (
 
 	"github.com/JGugino/world-hopper/internal/api"
 	"github.com/JGugino/world-hopper/internal/detect"
+	"github.com/JGugino/world-hopper/internal/link"
+	"github.com/JGugino/world-hopper/internal/oauth"
+	"github.com/JGugino/world-hopper/internal/store"
 	"github.com/JGugino/world-hopper/internal/store/localdir"
 	"github.com/JGugino/world-hopper/internal/sync"
 	"github.com/JGugino/world-hopper/internal/tray"
@@ -42,20 +45,32 @@ func main() {
 	flag.Var(&worldDirs, "world", "a single world folder to keep synced (repeatable)")
 	flag.Parse()
 
-	var engine *sync.Engine
-	if *storeDir != "" {
-		sd := *stateDir
-		if sd == "" {
-			cfg, err := os.UserConfigDir()
-			if err != nil {
-				log.Fatal(err)
-			}
-			sd = filepath.Join(cfg, "worldhop")
-		}
-		var err error
-		if engine, err = sync.New(localdir.New(*storeDir), sd); err != nil {
+	sd := *stateDir
+	if sd == "" {
+		cfg, err := os.UserConfigDir()
+		if err != nil {
 			log.Fatal(err)
 		}
+		sd = filepath.Join(cfg, "worldhop")
+	}
+	// -store picks a plain shared folder; otherwise syncing goes through the
+	// user's linked Google Drive or Dropbox account.
+	var cloud *link.Manager
+	var st store.Store
+	if *storeDir != "" {
+		st = localdir.New(*storeDir)
+	} else {
+		ccfg, err := link.LoadConfig(sd)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cloud = link.New(ccfg, oauth.KeyringStore{Service: "worldhop"}, sd)
+		cloud.OpenURL = window.OpenBrowser
+		st = cloud
+	}
+	engine, err := sync.New(st, sd)
+	if err != nil {
+		log.Fatal(err)
 	}
 	// Sources are re-resolved on every sync so new worlds are picked up.
 	// With none given, fall back to the known launcher locations.
@@ -79,13 +94,14 @@ func main() {
 		return ws
 	}
 	det := detect.New()
-	if engine != nil {
-		engine.IsOpen = det.WorldOpen
-	}
+	engine.IsOpen = det.WorldOpen
 	svc := sync.NewRunner(version, engine, listWorlds)
 	// The HTTP server is started on demand (Open Web View) and stopped again after
 	// idleTimeout without requests, so nothing listens while the UI isn't in use.
 	lazy := api.NewLazy(*addr, svc, ui.Assets(), idleTimeout)
+	if cloud != nil {
+		lazy.Cloud = cloud
+	}
 
 	openView := func() {
 		url, err := lazy.Ensure()

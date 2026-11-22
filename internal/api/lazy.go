@@ -22,6 +22,9 @@ type Lazy struct {
 	tick   time.Duration
 	grace  time.Duration // wait after the UI says it closed, to survive reloads
 
+	// Cloud, if set before Ensure, is given to each server started.
+	Cloud Cloud
+
 	mu  sync.Mutex
 	cur *Server
 }
@@ -46,6 +49,7 @@ func (l *Lazy) Ensure() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	srv.Cloud = l.Cloud
 	l.cur = srv
 	srv.OnClosed = func() { l.closeSoon(srv) }
 	go func() {

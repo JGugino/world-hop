@@ -24,6 +24,9 @@ type Server struct {
 	// (POST /api/bye). The page may just be reloading, so callers should wait
 	// a grace period and check LastActivity before acting on it.
 	OnClosed func()
+
+	// Cloud serves /api/cloud/*; nil answers 503.
+	Cloud Cloud
 }
 
 // New listens on 127.0.0.1 (port 0 picks a free port unless addr says otherwise).
@@ -56,6 +59,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	s.cloudRoutes(mux)
 	mux.Handle("/", s.static())
 	return hostGuard(mux)
 }
