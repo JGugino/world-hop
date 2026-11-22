@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getStatus, forceSync, type Status } from '$lib/api';
+	import { getStatus, forceSync, sayBye, type Status } from '$lib/api';
 
 	let status = $state<Status | null>(null);
 	let error = $state('');
@@ -25,7 +25,11 @@
 	onMount(() => {
 		refresh();
 		const t = setInterval(refresh, 3000);
-		return () => clearInterval(t);
+		window.addEventListener('pagehide', sayBye);
+		return () => {
+			clearInterval(t);
+			window.removeEventListener('pagehide', sayBye);
+		};
 	});
 </script>
 

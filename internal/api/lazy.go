@@ -11,12 +11,16 @@ import (
 
 // Lazy starts a Server only when asked and shuts it down after it has been idle,
 // so the HTTP listener doesn't exist while the UI isn't in use.
+// closeGrace is how long after the page reports closing before the server stops.
+const closeGrace = 5 * time.Second
+
 type Lazy struct {
 	addr   string
 	svc    *wsync.Runner
 	assets fs.FS
 	idle   time.Duration
 	tick   time.Duration
+	grace  time.Duration // wait after the UI says it closed, to survive reloads
 
 	mu  sync.Mutex
 	cur *Server
@@ -27,7 +31,7 @@ func NewLazy(addr string, svc *wsync.Runner, assets fs.FS, idle time.Duration) *
 	if tick <= 0 {
 		tick = time.Second
 	}
-	return &Lazy{addr: addr, svc: svc, assets: assets, idle: idle, tick: tick}
+	return &Lazy{addr: addr, svc: svc, assets: assets, idle: idle, tick: tick, grace: closeGrace}
 }
 
 // Ensure returns the URL of the running server, starting one (on a free
@@ -43,6 +47,7 @@ func (l *Lazy) Ensure() (string, error) {
 		return "", err
 	}
 	l.cur = srv
+	srv.OnClosed = func() { l.closeSoon(srv) }
 	go func() {
 		if err := srv.Serve(); err != nil && err.Error() != "http: Server closed" {
 			log.Printf("server stopped: %v", err)
@@ -79,6 +84,26 @@ func (l *Lazy) watch(srv *Server) {
 		l.mu.Unlock()
 	}
 }
+
+// closeSoon stops srv after the grace period unless it sees any request in the
+// meantime (a reload's new page, or another open view polling).
+func (l *Lazy) closeSoon(srv *Server) {
+	seen := srv.LastActivity()
+	time.AfterFunc(l.grace, func() {
+		l.mu.Lock()
+		if l.cur != srv || srv.LastActivity().After(seen) {
+			l.mu.Unlock()
+			return
+		}
+		l.cur = nil
+		l.mu.Unlock()
+		srv.Close()
+		log.Printf("web server stopped after view closed")
+	})
+}
+
+// CloseNow stops the server immediately, e.g. when a native window closes.
+func (l *Lazy) CloseNow() { l.Close() }
 
 // Close stops the server if it is running.
 func (l *Lazy) Close() {
