@@ -44,7 +44,7 @@ export type Snapshot = {
 	createdAt: string | null;
 };
 
-export type ProviderId = 'gdrive' | 'dropbox';
+export type ProviderId = 'gdrive';
 
 export type Provider = {
 	id: ProviderId;

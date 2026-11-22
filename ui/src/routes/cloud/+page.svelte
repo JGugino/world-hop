@@ -2,14 +2,17 @@
 	import { onMount } from 'svelte';
 	import { getProviders, linkProvider, unlinkProvider, type Provider } from '$lib/api';
 
-	let providers = $state<Provider[] | null>(null);
+	let p = $state<Provider | null>(null);
+	let loaded = $state(false);
 	let error = $state('');
 	let busy = $state<string | null>(null);
 	let confirmUnlink = $state<string | null>(null);
 
 	async function load() {
 		try {
-			providers = await getProviders();
+			// One provider today (Google Drive); the API stays a list so more can be added.
+			p = (await getProviders())[0] ?? null;
+			loaded = true;
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
 		}
@@ -54,48 +57,49 @@
 </p>
 {#if error}<p class="bad">{error}</p>{/if}
 
-{#if providers === null}
+{#if !loaded}
 	<p class="muted">Loading…</p>
-{:else}
-	{#each providers as p (p.id)}
-		<section class="card">
-			<div class="head">
-				<div>
-					<h2>{p.name}</h2>
-					{#if p.linked}
-						<p class="ok small">Connected{p.account ? ` as ${p.account}` : ''}</p>
-					{:else if p.pending}
-						<p class="muted small">Waiting for you to approve access in your browser…</p>
-					{:else if !p.available}
-						<p class="muted small">Coming soon.</p>
-					{:else}
-						<p class="muted small">Not connected.</p>
-					{/if}
-					{#if p.error}<p class="bad small">{p.error}</p>{/if}
-				</div>
-				{#if p.linked}
-					{#if confirmUnlink === p.id}
-						<span class="row">
-							<button class="danger" disabled={busy === p.id} onclick={() => disconnect(p)}>Disconnect</button>
-							<button class="secondary" onclick={() => (confirmUnlink = null)}>Cancel</button>
-						</span>
-					{:else}
-						<button class="secondary" onclick={() => (confirmUnlink = p.id)}>Disconnect</button>
-					{/if}
+{:else if p}
+	{@const prov = p}
+	<section class="card">
+		<div class="head">
+			<div>
+				<h2>{prov.name}</h2>
+				{#if prov.linked}
+					<p class="ok small">Connected{prov.account ? ` as ${prov.account}` : ''}</p>
+				{:else if prov.pending}
+					<p class="muted small">Waiting for you to approve access in your browser…</p>
+				{:else if !prov.available}
+					<p class="muted small">Coming soon.</p>
 				{:else}
-					<button disabled={!p.available || p.pending || busy === p.id} onclick={() => connect(p)}>
-						{p.error ? 'Reconnect' : 'Connect'}
-					</button>
+					<p class="muted small">Not connected.</p>
 				{/if}
+				{#if prov.error}<p class="bad small">{prov.error}</p>{/if}
 			</div>
-			{#if confirmUnlink === p.id}
-				<p class="muted small">
-					This forgets the saved sign-in on this computer. Worlds already in your cloud account stay
-					where they are.
-				</p>
+			{#if prov.linked}
+				{#if confirmUnlink === prov.id}
+					<span class="row">
+						<button class="danger" disabled={busy === prov.id} onclick={() => disconnect(prov)}>Disconnect</button>
+						<button class="secondary" onclick={() => (confirmUnlink = null)}>Cancel</button>
+					</span>
+				{:else}
+					<button class="secondary" onclick={() => (confirmUnlink = prov.id)}>Disconnect</button>
+				{/if}
+			{:else}
+				<button disabled={!prov.available || prov.pending || busy === prov.id} onclick={() => connect(prov)}>
+					{prov.error ? 'Reconnect' : 'Connect'}
+				</button>
 			{/if}
-		</section>
-	{/each}
+		</div>
+		{#if confirmUnlink === prov.id}
+			<p class="muted small">
+				This forgets the saved sign-in on this computer. Worlds already in your cloud account stay
+				where they are.
+			</p>
+		{/if}
+	</section>
+{:else}
+	<p class="muted">No cloud storage is available in this build.</p>
 {/if}
 
 <style>

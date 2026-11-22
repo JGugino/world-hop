@@ -16,14 +16,12 @@ import (
 	"github.com/JGugino/world-hopper/internal/httpx"
 	"github.com/JGugino/world-hopper/internal/oauth"
 	"github.com/JGugino/world-hopper/internal/store"
-	"github.com/JGugino/world-hopper/internal/store/dropbox"
 	"github.com/JGugino/world-hopper/internal/store/gdrive"
 )
 
 // Provider ids, as used by the API.
 const (
 	GoogleDrive = "gdrive"
-	Dropbox     = "dropbox"
 )
 
 // Link states reported for the chosen provider.
@@ -114,20 +112,6 @@ func New(cfg Config, tokens oauth.TokenStore, stateDir string) *Manager {
 				},
 				newStore: func(a httpx.Auth, hc *http.Client) store.Store { return gdrive.New(a, hc) },
 			},
-			Dropbox: {
-				id: Dropbox, name: "Dropbox",
-				configured: cfg.DropboxAppKey != "",
-				hint:       "WORLDHOP_DROPBOX_APP_KEY",
-				oauth: oauth.Config{
-					ClientID: cfg.DropboxAppKey,
-					AuthURL:  "https://www.dropbox.com/oauth2/authorize",
-					TokenURL: "https://api.dropboxapi.com/oauth2/token",
-					// App Folder apps need no scope parameter; offline gives a refresh token.
-					ExtraAuthParams: map[string]string{"token_access_type": "offline"},
-					RedirectPort:    cfg.DropboxRedirectPort,
-				},
-				newStore: func(a httpx.Auth, hc *http.Client) store.Store { return dropbox.New(a, hc) },
-			},
 		},
 	}
 	m.chosen = m.loadChoice()
@@ -172,7 +156,7 @@ func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	st := Status{Chosen: m.chosen, Error: m.lastErr}
-	ids := []string{GoogleDrive, Dropbox}
+	ids := []string{GoogleDrive} // add new providers here
 	for _, id := range ids {
 		p := m.providers[id]
 		st.Providers = append(st.Providers, ProviderStatus{ID: id, Name: p.name, Configured: p.configured, Linked: m.linked(id)})

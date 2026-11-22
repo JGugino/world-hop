@@ -15,18 +15,16 @@ import (
 	"github.com/JGugino/world-hopper/internal/httpx"
 	"github.com/JGugino/world-hopper/internal/oauth"
 	"github.com/JGugino/world-hopper/internal/store"
-	"github.com/JGugino/world-hopper/internal/store/dropbox"
 	"github.com/JGugino/world-hopper/internal/store/gdrive"
 	"github.com/JGugino/world-hopper/internal/store/storetest"
 )
 
-// env wires a Manager to a fake identity provider and fake Dropbox/Drive APIs.
+// env wires a Manager to a fake identity provider and fake Drive API.
 type env struct {
 	m       *Manager
 	tokens  *oauth.MemoryStore
 	idp     *httptest.Server
 	drive   *storetest.FakeDrive
-	dbx     *storetest.FakeDropbox
 	revoked bool
 	state   string
 	redir   string
@@ -35,9 +33,8 @@ type env struct {
 func newEnv(t *testing.T, cfg Config) *env {
 	t.Helper()
 	httpx.BaseDelay = time.Millisecond
-	e := &env{tokens: &oauth.MemoryStore{}, drive: storetest.NewFakeDrive(), dbx: storetest.NewFakeDropbox()}
+	e := &env{tokens: &oauth.MemoryStore{}, drive: storetest.NewFakeDrive()}
 	t.Cleanup(e.drive.Close)
-	t.Cleanup(e.dbx.Close)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -60,17 +57,11 @@ func newEnv(t *testing.T, cfg Config) *env {
 
 	e.m = New(cfg, e.tokens, t.TempDir())
 	e.m.HTTP = e.idp.Client()
-	g, d := e.m.providers[GoogleDrive], e.m.providers[Dropbox]
+	g := e.m.providers[GoogleDrive]
 	g.oauth.AuthURL, g.oauth.TokenURL = e.idp.URL+"/auth", e.idp.URL+"/token"
-	d.oauth.AuthURL, d.oauth.TokenURL = e.idp.URL+"/auth", e.idp.URL+"/token"
 	g.newStore = func(a httpx.Auth, hc *http.Client) store.Store {
 		s := gdrive.New(a, e.drive.Client())
 		s.APIBase = e.drive.URL
-		return s
-	}
-	d.newStore = func(a httpx.Auth, hc *http.Client) store.Store {
-		s := dropbox.New(a, e.dbx.Client())
-		s.APIBase, s.ContentBase = e.dbx.URL, e.dbx.URL
 		return s
 	}
 	e.m.OpenURL = func(u string) error { // the "browser"
@@ -96,20 +87,19 @@ func (e *env) waitState(t *testing.T, want string) Status {
 	return Status{}
 }
 
-var both = Config{GoogleClientID: "gid", DropboxAppKey: "dkey"}
+var both = Config{GoogleClientID: "gid"}
 
-func TestLinkAndSyncThroughBothProviders(t *testing.T) {
+func TestLinkAndSyncThroughGoogleDrive(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		id    string
 		count func(e *env) int
 	}{
 		{GoogleDrive, func(e *env) int { return len(e.drive.Names()) }},
-		{Dropbox, func(e *env) int { return len(e.dbx.Paths()) }},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
 			e := newEnv(t, both)
-			if st := e.m.Status(); st.State != StateNone || len(st.Providers) != 2 {
+			if st := e.m.Status(); st.State != StateNone || len(st.Providers) != 1 {
 				t.Fatalf("initial status = %+v", st)
 			}
 			if err := e.m.PutPack(ctx, "x", nil); !errors.Is(err, ErrNotLinked) {
@@ -126,7 +116,7 @@ func TestLinkAndSyncThroughBothProviders(t *testing.T) {
 				t.Fatalf("StartLink: %q %v", u, err)
 			}
 			st := e.waitState(t, StateLinked)
-			if !st.Providers[0].Linked && !st.Providers[1].Linked {
+			if !st.Providers[0].Linked {
 				t.Fatalf("no provider shows linked: %+v", st)
 			}
 			if _, err := e.tokens.Get(tc.id); err != nil {
@@ -181,11 +171,11 @@ func TestRevokedAccessAsksToReconnectThenRelinks(t *testing.T) {
 
 func TestChoiceSurvivesRestart(t *testing.T) {
 	e := newEnv(t, both)
-	if err := e.m.Choose(Dropbox); err != nil {
+	if err := e.m.Choose(GoogleDrive); err != nil {
 		t.Fatal(err)
 	}
 	m2 := New(both, e.tokens, e.m.dir)
-	if m2.Status().Chosen != Dropbox {
+	if m2.Status().Chosen != GoogleDrive {
 		t.Fatalf("chosen = %q", m2.Status().Chosen)
 	}
 	if err := e.m.Choose("nope"); !errors.Is(err, ErrUnknownProvider) {
@@ -199,7 +189,7 @@ func TestStartLinkNeedsClientID(t *testing.T) {
 	if !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("err = %v", err)
 	}
-	if st := m.Status(); st.Providers[0].Configured || st.Providers[1].Configured {
+	if st := m.Status(); st.Providers[0].Configured {
 		t.Fatalf("%+v", st)
 	}
 }
@@ -221,24 +211,22 @@ func TestCancelLink(t *testing.T) {
 
 func TestLoadConfigCompiledInDefaults(t *testing.T) {
 	DefaultGoogleClientID, DefaultGoogleClientSecret = "gdef", "gsec"
-	DefaultDropboxAppKey, DefaultDropboxRedirectPort = "ddef", "53682"
 	t.Cleanup(func() {
-		DefaultGoogleClientID, DefaultGoogleClientSecret, DefaultDropboxAppKey, DefaultDropboxRedirectPort = "", "", "", ""
+		DefaultGoogleClientID, DefaultGoogleClientSecret = "", ""
 	})
-	t.Setenv("WORLDHOP_DROPBOX_APP_KEY", "")
 	c, err := LoadConfig(t.TempDir()) // no cloud.json, no env: defaults apply
-	if err != nil || c.GoogleClientID != "gdef" || c.GoogleClientSecret != "gsec" || c.DropboxAppKey != "ddef" || c.DropboxRedirectPort != 53682 {
+	if err != nil || c.GoogleClientID != "gdef" || c.GoogleClientSecret != "gsec" {
 		t.Fatalf("%+v %v", c, err)
 	}
 	t.Setenv("WORLDHOP_GOOGLE_CLIENT_ID", "override")
-	if c, _ := LoadConfig(t.TempDir()); c.GoogleClientID != "override" || c.DropboxAppKey != "ddef" {
+	if c, _ := LoadConfig(t.TempDir()); c.GoogleClientID != "override" {
 		t.Fatalf("%+v", c)
 	}
 }
 
 func TestNotConfiguredMessageIsDeveloperFacing(t *testing.T) {
 	m := New(Config{}, &oauth.MemoryStore{}, t.TempDir())
-	_, err := m.StartLink(Dropbox)
+	_, err := m.StartLink(GoogleDrive)
 	if !errors.Is(err, ErrNotConfigured) || !strings.Contains(err.Error(), "docs/cloud-setup.md") {
 		t.Fatalf("err = %v", err)
 	}
@@ -246,11 +234,10 @@ func TestNotConfiguredMessageIsDeveloperFacing(t *testing.T) {
 
 func TestLoadConfig(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "cloud.json"), []byte(`{"googleClientId":"fromfile","dropboxAppKey":"k"}`), 0o600)
+	os.WriteFile(filepath.Join(dir, "cloud.json"), []byte(`{"googleClientId":"fromfile"}`), 0o600)
 	t.Setenv("WORLDHOP_GOOGLE_CLIENT_ID", "fromenv")
-	t.Setenv("WORLDHOP_DROPBOX_REDIRECT_PORT", "53682")
 	c, err := LoadConfig(dir)
-	if err != nil || c.GoogleClientID != "fromenv" || c.DropboxAppKey != "k" || c.DropboxRedirectPort != 53682 {
+	if err != nil || c.GoogleClientID != "fromenv" {
 		t.Fatalf("%+v %v", c, err)
 	}
 	if _, err := LoadConfig(t.TempDir()); err != nil {

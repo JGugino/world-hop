@@ -11,7 +11,6 @@ import (
 
 	"github.com/JGugino/world-hopper/internal/httpx"
 	"github.com/JGugino/world-hopper/internal/store"
-	"github.com/JGugino/world-hopper/internal/store/dropbox"
 	"github.com/JGugino/world-hopper/internal/store/gdrive"
 	"github.com/JGugino/world-hopper/internal/store/storetest"
 	"github.com/JGugino/world-hopper/internal/sync"
@@ -68,16 +67,4 @@ func TestEngineOverFakeDrive(t *testing.T) {
 		s.APIBase = fake.URL
 		return s
 	}, fake.Names)
-}
-
-func TestEngineOverFakeDropbox(t *testing.T) {
-	httpx.BaseDelay = time.Millisecond
-	fake := storetest.NewFakeDropbox()
-	defer fake.Close()
-	fake.Fail429 = 7
-	twoDevice(t, func() store.Store {
-		s := dropbox.New(&storetest.Auth{Fresh: "tok"}, fake.Client())
-		s.APIBase, s.ContentBase = fake.URL, fake.URL
-		return s
-	}, fake.Paths)
 }

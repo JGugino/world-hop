@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strconv"
 )
 
 // Build-time defaults. A release binary has the app's own registered OAuth
@@ -18,10 +17,8 @@ import (
 // but it is still sent on token requests, so it is compiled in too. They must
 // never be committed to the repository.
 var (
-	DefaultGoogleClientID      string
-	DefaultGoogleClientSecret  string
-	DefaultDropboxAppKey       string
-	DefaultDropboxRedirectPort string // optional, decimal
+	DefaultGoogleClientID     string
+	DefaultGoogleClientSecret string
 )
 
 // Config holds the OAuth client settings. Compiled-in defaults are used unless
@@ -30,17 +27,11 @@ var (
 //
 //	WORLDHOP_GOOGLE_CLIENT_ID      Google OAuth client (type "Desktop app")
 //	WORLDHOP_GOOGLE_CLIENT_SECRET  optional; Google issues one for desktop clients
-//	WORLDHOP_DROPBOX_APP_KEY       Dropbox app key (App Folder access)
-//	WORLDHOP_DROPBOX_REDIRECT_PORT optional fixed loopback port, if the Dropbox
-//	                               app must register an exact redirect URI
 //
-// cloud.json uses the keys googleClientId, googleClientSecret, dropboxAppKey
-// and dropboxRedirectPort.
+// cloud.json uses the keys googleClientId and googleClientSecret.
 type Config struct {
-	GoogleClientID      string `json:"googleClientId"`
-	GoogleClientSecret  string `json:"googleClientSecret"`
-	DropboxAppKey       string `json:"dropboxAppKey"`
-	DropboxRedirectPort int    `json:"dropboxRedirectPort"`
+	GoogleClientID     string `json:"googleClientId"`
+	GoogleClientSecret string `json:"googleClientSecret"`
 }
 
 // LoadConfig starts from the compiled-in defaults, then applies the optional
@@ -49,10 +40,6 @@ func LoadConfig(stateDir string) (Config, error) {
 	c := Config{
 		GoogleClientID:     DefaultGoogleClientID,
 		GoogleClientSecret: DefaultGoogleClientSecret,
-		DropboxAppKey:      DefaultDropboxAppKey,
-	}
-	if n, err := strconv.Atoi(DefaultDropboxRedirectPort); err == nil {
-		c.DropboxRedirectPort = n
 	}
 	b, err := os.ReadFile(filepath.Join(stateDir, "cloud.json"))
 	if err == nil {
@@ -67,14 +54,6 @@ func LoadConfig(stateDir string) (Config, error) {
 	}
 	if v := os.Getenv("WORLDHOP_GOOGLE_CLIENT_SECRET"); v != "" {
 		c.GoogleClientSecret = v
-	}
-	if v := os.Getenv("WORLDHOP_DROPBOX_APP_KEY"); v != "" {
-		c.DropboxAppKey = v
-	}
-	if v := os.Getenv("WORLDHOP_DROPBOX_REDIRECT_PORT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.DropboxRedirectPort = n
-		}
 	}
 	return c, nil
 }
