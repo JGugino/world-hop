@@ -1,5 +1,5 @@
 // Package storetest holds a contract test suite for store.Store backends and
-// in-process fake Google Drive / Dropbox servers to run it against.
+// in-process fake Google Drive server to run it against.
 package storetest
 
 import (

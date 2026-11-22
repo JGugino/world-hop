@@ -10,18 +10,15 @@ import (
 
 func TestAPIAdapter(t *testing.T) {
 	ctx := context.Background()
-	e := newEnv(t, Config{GoogleClientID: "gid"}) // Dropbox not configured
+	e := newEnv(t, Config{GoogleClientID: "gid"})
 	a := API{M: e.m}
 
 	l := a.List(ctx)
-	if len(l) != 2 || !l[0].Available && !l[1].Available {
+	if len(l) != 1 || l[0].ID != GoogleDrive || !l[0].Available {
 		t.Fatalf("list = %+v", l)
 	}
-	byID := map[string]api.Provider{l[0].ID: l[0], l[1].ID: l[1]}
-	if !byID[GoogleDrive].Available || byID[Dropbox].Available {
-		t.Fatalf("availability: %+v", byID)
-	}
-	if _, err := a.Link(ctx, Dropbox); !errors.Is(err, api.ErrProviderUnavailable) {
+	unconfigured := API{M: newEnv(t, Config{}).m}
+	if _, err := unconfigured.Link(ctx, GoogleDrive); !errors.Is(err, api.ErrProviderUnavailable) {
 		t.Fatalf("err = %v", err)
 	}
 	if _, err := a.Link(ctx, "nope"); !errors.Is(err, api.ErrUnknownProvider) {

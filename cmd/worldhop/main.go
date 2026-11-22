@@ -55,7 +55,7 @@ func main() {
 		sd = filepath.Join(cfgDir, "worldhop")
 	}
 	// -store picks a plain shared folder; otherwise syncing goes through the
-	// user's linked Google Drive or Dropbox account.
+	// user's linked Google Drive account.
 	var cloud *link.Manager
 	var st store.Store
 	if *storeDir != "" {

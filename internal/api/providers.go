@@ -7,7 +7,7 @@ import (
 
 // Provider is a cloud storage service the user can link, as the UI sees it.
 type Provider struct {
-	ID   string `json:"id"` // "gdrive" | "dropbox"
+	ID   string `json:"id"` // e.g. "gdrive"
 	Name string `json:"name"`
 	// Available is false while the provider is not implemented in this build;
 	// the UI shows it greyed out.
@@ -42,13 +42,12 @@ type Providers interface {
 	Unlink(ctx context.Context, id string) error
 }
 
-// StubProviders lists Google Drive and Dropbox as not yet available.
+// StubProviders lists Google Drive as not yet available.
 type StubProviders struct{}
 
 func (StubProviders) List(context.Context) []Provider {
 	return []Provider{
 		{ID: "gdrive", Name: "Google Drive"},
-		{ID: "dropbox", Name: "Dropbox"},
 	}
 }
 
@@ -59,7 +58,7 @@ func (StubProviders) Link(_ context.Context, id string) (LinkStart, error) {
 func (StubProviders) Unlink(_ context.Context, id string) error { return stubErr(id) }
 
 func stubErr(id string) error {
-	if id == "gdrive" || id == "dropbox" {
+	if id == "gdrive" {
 		return ErrProviderUnavailable
 	}
 	return ErrUnknownProvider

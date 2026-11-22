@@ -77,7 +77,7 @@ func TestSettingsAPI(t *testing.T) {
 		t.Fatalf("snapshots: %d %s", w.Code, w.Body)
 	}
 
-	if w := do("GET", "/api/providers", ""); !strings.Contains(w.Body.String(), `"dropbox"`) {
+	if w := do("GET", "/api/providers", ""); !strings.Contains(w.Body.String(), `"gdrive"`) {
 		t.Fatalf("providers: %s", w.Body)
 	}
 	if w := do("POST", "/api/providers/gdrive/link", ""); w.Code != http.StatusNotImplemented {
