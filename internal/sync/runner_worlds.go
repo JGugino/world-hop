@@ -27,6 +27,8 @@ type WorldInfo struct {
 	// determined (no store linked, or the store was unreachable; see Error).
 	Status string `json:"status"`
 	Open   bool   `json:"open"`
+	// Locked: the free version is already syncing a different world.
+	Locked bool   `json:"locked,omitempty"`
 	Error  string `json:"error,omitempty"`
 }
 
@@ -36,6 +38,7 @@ func (r *Runner) Worlds(ctx context.Context) []WorldInfo {
 	out := make([]WorldInfo, 0, len(ws))
 	for _, w := range ws {
 		info := WorldInfo{ID: w.ID, Name: w.Name, Path: w.Path, Launcher: w.Launcher, Status: "unknown"}
+		info.Locked = r.Limited != nil && r.Limited(w.ID)
 		if r.engine == nil {
 			info.Error = ErrNoStore.Error()
 		} else {
@@ -114,3 +117,6 @@ func (r *Runner) Restore(id, snapshotID string) error {
 	defer r.pass.Unlock()
 	return r.engine.Restore(w, snapshotID)
 }
+
+// FindWorld looks a world up by id among the configured sources.
+func (r *Runner) FindWorld(id string) (worlds.World, error) { return r.find(id) }

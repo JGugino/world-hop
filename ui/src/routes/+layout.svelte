@@ -9,7 +9,8 @@
 	const tabs = [
 		{ href: '/', label: 'Worlds' },
 		{ href: '/sources', label: 'Sources' },
-		{ href: '/cloud', label: 'Cloud account' }
+		{ href: '/cloud', label: 'Cloud account' },
+		{ href: '/license', label: 'License' }
 	];
 
 	function ago(iso: string | null) {

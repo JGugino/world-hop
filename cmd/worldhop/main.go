@@ -13,6 +13,7 @@ import (
 	"github.com/JGugino/world-hopper/internal/api"
 	"github.com/JGugino/world-hopper/internal/config"
 	"github.com/JGugino/world-hopper/internal/detect"
+	"github.com/JGugino/world-hopper/internal/license"
 	"github.com/JGugino/world-hopper/internal/link"
 	"github.com/JGugino/world-hopper/internal/oauth"
 	"github.com/JGugino/world-hopper/internal/store"
@@ -24,7 +25,8 @@ import (
 	"github.com/JGugino/world-hopper/ui"
 )
 
-const version = "0.0.1"
+// version is overridden at release time with -ldflags "-X main.version=...".
+var version = "0.0.1"
 
 // listFlag collects a repeatable flag.
 type listFlag []string
@@ -73,6 +75,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	lic, err := license.New(sd)
+	if err != nil {
+		log.Fatal(err)
+	}
+	engine.Authorize = lic.Authorize
 
 	// Sources live in a config file the UI edits. On first run, seed it with the
 	// launcher folders that exist on this computer; -saves / -world add more.
@@ -113,13 +120,21 @@ func main() {
 	det := detect.New()
 	engine.IsOpen = det.WorldOpen
 	svc := sync.NewRunner(version, engine, listWorlds)
+	svc.Limited = lic.Limited
+	// Re-check a stored Pro key now and then (refunds, offline grace).
+	go func() {
+		for {
+			lic.Refresh(context.Background())
+			time.Sleep(time.Hour)
+		}
+	}()
 	// The HTTP server is started on demand (Open Web View) and stopped again after
 	// idleTimeout without requests, so nothing listens while the UI isn't in use.
 	var providers api.Providers = api.StubProviders{} // -store mode has no cloud accounts
 	if cloud != nil {
 		providers = link.API{M: cloud}
 	}
-	lazy := api.NewLazy(*addr, svc, ui.Assets(), api.Deps{Sources: cfg, Providers: providers}, idleTimeout)
+	lazy := api.NewLazy(*addr, svc, ui.Assets(), api.Deps{Sources: cfg, Providers: providers, License: lic}, idleTimeout)
 
 	openView := func() {
 		url, err := lazy.Ensure()
