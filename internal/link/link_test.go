@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,6 +216,31 @@ func TestCancelLink(t *testing.T) {
 	e.m.CancelLink()
 	if st := e.m.Status(); st.State != StateUnlinked {
 		t.Fatalf("%+v", st)
+	}
+}
+
+func TestLoadConfigCompiledInDefaults(t *testing.T) {
+	DefaultGoogleClientID, DefaultGoogleClientSecret = "gdef", "gsec"
+	DefaultDropboxAppKey, DefaultDropboxRedirectPort = "ddef", "53682"
+	t.Cleanup(func() {
+		DefaultGoogleClientID, DefaultGoogleClientSecret, DefaultDropboxAppKey, DefaultDropboxRedirectPort = "", "", "", ""
+	})
+	t.Setenv("WORLDHOP_DROPBOX_APP_KEY", "")
+	c, err := LoadConfig(t.TempDir()) // no cloud.json, no env: defaults apply
+	if err != nil || c.GoogleClientID != "gdef" || c.GoogleClientSecret != "gsec" || c.DropboxAppKey != "ddef" || c.DropboxRedirectPort != 53682 {
+		t.Fatalf("%+v %v", c, err)
+	}
+	t.Setenv("WORLDHOP_GOOGLE_CLIENT_ID", "override")
+	if c, _ := LoadConfig(t.TempDir()); c.GoogleClientID != "override" || c.DropboxAppKey != "ddef" {
+		t.Fatalf("%+v", c)
+	}
+}
+
+func TestNotConfiguredMessageIsDeveloperFacing(t *testing.T) {
+	m := New(Config{}, &oauth.MemoryStore{}, t.TempDir())
+	_, err := m.StartLink(Dropbox)
+	if !errors.Is(err, ErrNotConfigured) || !strings.Contains(err.Error(), "docs/cloud-setup.md") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

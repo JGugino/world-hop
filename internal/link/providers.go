@@ -45,7 +45,8 @@ func (a API) Link(_ context.Context, id string) (api.LinkStart, error) {
 	case errors.Is(err, ErrUnknownProvider):
 		return api.LinkStart{}, api.ErrUnknownProvider
 	case errors.Is(err, ErrNotConfigured):
-		return api.LinkStart{}, api.ErrProviderUnavailable
+		// Keep the developer-facing message; it maps to 501 like ErrProviderUnavailable.
+		return api.LinkStart{}, &unavailable{err}
 	case err != nil:
 		return api.LinkStart{}, err
 	}
@@ -63,3 +64,8 @@ func (a API) Unlink(_ context.Context, id string) error {
 	}
 	return err
 }
+
+type unavailable struct{ error }
+
+func (u *unavailable) Is(target error) bool { return target == api.ErrProviderUnavailable }
+func (u *unavailable) Unwrap() error        { return u.error }
