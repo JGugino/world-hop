@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/JGugino/world-hopper/internal/api"
 	"github.com/JGugino/world-hopper/internal/store/localdir"
@@ -18,6 +19,10 @@ import (
 )
 
 const version = "0.0.1"
+
+// idleTimeout is how long the web server lingers with no requests. The UI polls
+// every few seconds while open, so only a closed/abandoned view lets it lapse.
+const idleTimeout = 3 * time.Minute
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:0", "listen address (must be loopback)")
@@ -46,30 +51,34 @@ func main() {
 		return worlds.Discover(worlds.DefaultRoots(runtime.GOOS, home, os.Getenv("APPDATA")))
 	}
 	svc := sync.NewRunner(version, engine, listWorlds)
-	srv, err := api.New(*addr, svc, ui.Assets())
-	if err != nil {
-		log.Fatal(err)
-	}
-	go func() {
-		if err := srv.Serve(); err != nil {
-			log.Printf("server stopped: %v", err)
-		}
-	}()
-	log.Printf("WorldHop UI at %s", srv.URL())
+	// The HTTP server is started on demand (Open Web View) and stopped again after
+	// idleTimeout without requests, so nothing listens while the UI isn't in use.
+	lazy := api.NewLazy(*addr, svc, ui.Assets(), idleTimeout)
 
 	openView := func() {
-		if err := window.Open(srv.URL()); err != nil {
+		url, err := lazy.Ensure()
+		if err != nil {
+			log.Printf("start web server: %v", err)
+			return
+		}
+		if err := window.Open(url); err != nil {
 			log.Printf("open view: %v", err)
 		}
 	}
 
 	if *headless {
+		// No tray to trigger it, so serve right away and keep running.
+		url, err := lazy.Ensure()
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("WorldHop UI at %s", url)
 		select {}
 	}
 
 	tray.Run(tray.Handlers{
 		OpenView:  openView,
 		ForceSync: func() { svc.ForceSync(context.Background()) },
-		Exit:      func() { srv.Close() },
+		Exit:      func() { lazy.Close() },
 	}, nil)
 }

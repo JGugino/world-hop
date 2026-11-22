@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	stdsync "sync/atomic"
+	"time"
 
 	"github.com/JGugino/world-hopper/internal/sync"
 )
@@ -16,6 +18,7 @@ type Server struct {
 	assets fs.FS
 	ln     net.Listener
 	srv    *http.Server
+	last   stdsync.Int64 // unix nanos of the last request
 }
 
 // New listens on 127.0.0.1 (port 0 picks a free port unless addr says otherwise).
@@ -25,7 +28,12 @@ func New(addr string, svc *sync.Runner, assets fs.FS) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{svc: svc, assets: assets, ln: ln}
-	s.srv = &http.Server{Handler: s.Handler()}
+	s.last.Store(time.Now().UnixNano())
+	h := s.Handler()
+	s.srv = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.last.Store(time.Now().UnixNano())
+		h.ServeHTTP(w, r)
+	})}
 	return s, nil
 }
 
@@ -81,7 +89,10 @@ func (s *Server) static() http.Handler {
 
 func (s *Server) URL() string  { return "http://" + s.ln.Addr().String() + "/" }
 func (s *Server) Serve() error { return s.srv.Serve(s.ln) }
-func (s *Server) Close() error { return s.srv.Close() }
+
+// LastActivity reports when the server last received a request (or started).
+func (s *Server) LastActivity() time.Time { return time.Unix(0, s.last.Load()) }
+func (s *Server) Close() error            { return s.srv.Close() }
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
