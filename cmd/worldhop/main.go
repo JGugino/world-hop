@@ -113,6 +113,16 @@ func main() {
 	det := detect.New()
 	engine.IsOpen = det.WorldOpen
 	svc := sync.NewRunner(version, engine, listWorlds)
+	svc.AutoDownload = true
+	svc.SavesFolders = func() []string {
+		var out []string
+		for _, s := range cfg.Sources() {
+			if s.Kind == worlds.KindSaves {
+				out = append(out, s.Path)
+			}
+		}
+		return out
+	}
 	// The HTTP server is started on demand (Open Web View) and stopped again after
 	// idleTimeout without requests, so nothing listens while the UI isn't in use.
 	var providers api.Providers = api.StubProviders{} // -store mode has no cloud accounts

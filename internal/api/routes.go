@@ -184,6 +184,29 @@ func (s *Server) routes(mux *http.ServeMux) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	mux.HandleFunc("GET /api/cloud-worlds", func(w http.ResponseWriter, r *http.Request) {
+		cw, err := s.svc.CloudWorlds(r.Context())
+		if err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		writeJSON(w, cw)
+	})
+	mux.HandleFunc("POST /api/cloud-worlds/{id}/download", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Saves string `json:"saves"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		res, err := s.svc.DownloadWorld(r.Context(), r.PathValue("id"), body.Saves)
+		if err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"id": r.PathValue("id"), "snapshot": res.Snapshot})
+	})
+
 	mux.HandleFunc("GET /api/providers", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, s.providers().List(r.Context()))
 	})
@@ -207,13 +230,13 @@ func (s *Server) routes(mux *http.ServeMux) {
 func writeServiceErr(w http.ResponseWriter, err error) {
 	var ce *sync.ConflictError
 	switch {
-	case errors.Is(err, sync.ErrUnknownWorld), errors.Is(err, ErrUnknownProvider), errors.Is(err, os.ErrNotExist):
+	case errors.Is(err, sync.ErrUnknownWorld), errors.Is(err, sync.ErrNotInStore), errors.Is(err, ErrUnknownProvider), errors.Is(err, os.ErrNotExist):
 		writeErr(w, http.StatusNotFound, err)
-	case errors.Is(err, sync.ErrBadStrategy):
+	case errors.Is(err, sync.ErrBadStrategy), errors.Is(err, sync.ErrBadTarget):
 		writeErr(w, http.StatusBadRequest, err)
 	case errors.Is(err, sync.ErrNoStore), errors.Is(err, ErrProviderUnavailable):
 		writeErr(w, http.StatusNotImplemented, err)
-	case errors.Is(err, sync.ErrWorldOpen), errors.As(err, &ce):
+	case errors.Is(err, sync.ErrWorldOpen), errors.Is(err, sync.ErrDestExists), errors.As(err, &ce):
 		writeErr(w, http.StatusConflict, err)
 	default:
 		writeErr(w, http.StatusInternalServerError, err)
