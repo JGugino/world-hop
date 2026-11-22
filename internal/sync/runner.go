@@ -15,7 +15,10 @@ type RunnerStatus struct {
 	State      string     `json:"state"` // "idle" | "syncing"
 	LastSync   *time.Time `json:"lastSync"`
 	LastResult string     `json:"lastResult"`
-	Version    string     `json:"version"`
+	// Warnings lists worlds that need attention, e.g. a newer version exists
+	// but the world is open in Minecraft.
+	Warnings []string `json:"warnings"`
+	Version  string   `json:"version"`
 }
 
 // Runner drives the Engine for the tray and local API: it tracks sync state
@@ -24,6 +27,7 @@ type Runner struct {
 	engine *Engine
 	list   func() []worlds.World
 
+	pass   stdsync.Mutex // one sync pass at a time
 	mu     stdsync.Mutex
 	status RunnerStatus
 }
@@ -50,19 +54,44 @@ func (r *Runner) Status() RunnerStatus {
 	return r.status
 }
 
-// ForceSync runs a sync pass now. If one is already running it returns the
-// current status without starting another.
+// ForceSync runs a sync pass over every world now. If one is already running
+// it returns the current status without starting another.
 func (r *Runner) ForceSync(ctx context.Context) RunnerStatus {
-	r.mu.Lock()
-	if r.status.State == "syncing" {
-		st := r.status
-		r.mu.Unlock()
-		return st
+	if !r.pass.TryLock() {
+		return r.Status()
 	}
+	defer r.pass.Unlock()
+	return r.runPass(ctx, r.listWorlds())
+}
+
+// SyncWorlds syncs just the given worlds, waiting for any pass already in
+// progress to finish first (so a world that just closed is never dropped).
+func (r *Runner) SyncWorlds(ctx context.Context, ws []worlds.World) RunnerStatus {
+	r.pass.Lock()
+	defer r.pass.Unlock()
+	return r.runPass(ctx, ws)
+}
+
+// SyncAll is ForceSync but waits for a running pass instead of skipping.
+func (r *Runner) SyncAll(ctx context.Context) RunnerStatus {
+	r.pass.Lock()
+	defer r.pass.Unlock()
+	return r.runPass(ctx, r.listWorlds())
+}
+
+func (r *Runner) listWorlds() []worlds.World {
+	if r.list == nil {
+		return nil
+	}
+	return r.list()
+}
+
+func (r *Runner) runPass(ctx context.Context, ws []worlds.World) RunnerStatus {
+	r.mu.Lock()
 	r.status.State = "syncing"
 	r.mu.Unlock()
 
-	result := r.run(ctx)
+	result, warnings := r.run(ctx, ws)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -70,25 +99,23 @@ func (r *Runner) ForceSync(ctx context.Context) RunnerStatus {
 	r.status.State = "idle"
 	r.status.LastSync = &now
 	r.status.LastResult = result
+	r.status.Warnings = warnings
 	return r.status
 }
 
-func (r *Runner) run(ctx context.Context) string {
+func (r *Runner) run(ctx context.Context, ws []worlds.World) (string, []string) {
 	if r.engine == nil {
-		return "No sync store configured yet."
-	}
-	var ws []worlds.World
-	if r.list != nil {
-		ws = r.list()
+		return "No sync store configured yet.", nil
 	}
 	if len(ws) == 0 {
-		return "No worlds found."
+		return "No worlds found.", nil
 	}
 	var pushed, pulled, synced, open, conflicts, failed int
 	var firstErr error
+	var warnings []string
 	for _, w := range ws {
 		if ctx.Err() != nil {
-			return "Sync cancelled."
+			return "Sync cancelled.", warnings
 		}
 		st, err := r.engine.Status(ctx, w)
 		if err == nil {
@@ -103,6 +130,8 @@ func (r *Runner) run(ctx context.Context) string {
 			case StatusRemoteAhead:
 				if _, err = r.engine.Pull(ctx, w); err == nil {
 					pulled++
+				} else if errors.Is(err, ErrWorldOpen) {
+					warnings = append(warnings, fmt.Sprintf("%s has a newer version in the cloud but is open in Minecraft. Close it to update.", w.Name))
 				}
 			case StatusConflict:
 				conflicts++
@@ -134,5 +163,5 @@ func (r *Runner) run(ctx context.Context) string {
 	if failed > 0 {
 		msg += fmt.Sprintf(", %d failed (%v)", failed, firstErr)
 	}
-	return msg + "."
+	return msg + ".", warnings
 }

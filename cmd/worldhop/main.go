@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/JGugino/world-hopper/internal/api"
+	"github.com/JGugino/world-hopper/internal/detect"
 	"github.com/JGugino/world-hopper/internal/store/localdir"
 	"github.com/JGugino/world-hopper/internal/sync"
 	"github.com/JGugino/world-hopper/internal/tray"
@@ -20,6 +21,11 @@ import (
 
 const version = "0.0.1"
 
+// listFlag collects a repeatable flag.
+type listFlag []string
+
+func (l *listFlag) String() string     { return strings.Join(*l, ",") }
+func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
 // idleTimeout is how long the web server lingers with no requests. The UI polls
 // every few seconds while open, so only a closed/abandoned view lets it lapse.
 const idleTimeout = 3 * time.Minute
@@ -29,6 +35,9 @@ func main() {
 	headless := flag.Bool("no-tray", false, "serve the API/UI only, without a tray icon")
 	storeDir := flag.String("store", "", "sync to this shared folder (local-directory store)")
 	stateDir := flag.String("state", "", "per-device state directory (default: user config dir)")
+	var savesDirs, worldDirs listFlag
+	flag.Var(&savesDirs, "saves", "a saves folder to keep synced (repeatable)")
+	flag.Var(&worldDirs, "world", "a single world folder to keep synced (repeatable)")
 	flag.Parse()
 
 	var engine *sync.Engine
@@ -46,9 +55,30 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+	// Sources are re-resolved on every sync so new worlds are picked up.
+	// With none given, fall back to the known launcher locations.
+	var sources []worlds.Source
+	for _, p := range savesDirs {
+		sources = append(sources, worlds.Source{Kind: worlds.KindSaves, Path: p})
+	}
+	for _, p := range worldDirs {
+		sources = append(sources, worlds.Source{Kind: worlds.KindWorld, Path: p})
+	}
 	listWorlds := func() []worlds.World {
-		home, _ := os.UserHomeDir()
-		return worlds.Discover(worlds.DefaultRoots(runtime.GOOS, home, os.Getenv("APPDATA")))
+		src := sources
+		if len(src) == 0 {
+			home, _ := os.UserHomeDir()
+			src = worlds.DefaultSources(runtime.GOOS, home, os.Getenv("APPDATA"))
+		}
+		ws, problems := worlds.Resolve(src)
+		for _, p := range problems {
+			log.Printf("source: %v", p)
+		}
+		return ws
+	}
+	det := detect.New()
+	if engine != nil {
+		engine.IsOpen = det.WorldOpen
 	}
 	svc := sync.NewRunner(version, engine, listWorlds)
 	// The HTTP server is started on demand (Open Web View) and stopped again after
