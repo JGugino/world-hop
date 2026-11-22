@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/JGugino/world-hopper/internal/api"
@@ -26,6 +27,7 @@ type listFlag []string
 
 func (l *listFlag) String() string     { return strings.Join(*l, ",") }
 func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
+
 // idleTimeout is how long the web server lingers with no requests. The UI polls
 // every few seconds while open, so only a closed/abandoned view lets it lapse.
 const idleTimeout = 3 * time.Minute
