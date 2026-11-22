@@ -5,3 +5,6 @@ ui/node_modules
 ui/.svelte-kit
 worldhopper
 *.test
+
+# Local build output
+/worldhop
