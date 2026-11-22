@@ -1,0 +1,5 @@
+# Built UI is generated; keep the dir so go:embed works.
+ui/build/*
+!ui/build/.gitkeep
+ui/node_modules
+ui/.svelte-kit
