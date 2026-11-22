@@ -1,5 +1,9 @@
 default:
-	@go build -o worldhop ./cmd/worldhop
+	@echo "Building Web View UI..."
+	@cd ui/ && pnpm build
+	@echo "Building WorldHop executable..."
+	@cd .. & go build -o worldhop ./cmd/worldhop
+	@echo "Starting WorldHop..."
 	@./worldhop -store ~/Documents/projects/claude-projects/testing-shared
 
 # Release build with the app's own OAuth client IDs compiled in (see
