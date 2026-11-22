@@ -12,14 +12,14 @@ import (
 )
 
 type Server struct {
-	svc    *sync.Service
+	svc    *sync.Runner
 	assets fs.FS
 	ln     net.Listener
 	srv    *http.Server
 }
 
 // New listens on 127.0.0.1 (port 0 picks a free port unless addr says otherwise).
-func New(addr string, svc *sync.Service, assets fs.FS) (*Server, error) {
+func New(addr string, svc *sync.Runner, assets fs.FS) (*Server, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err

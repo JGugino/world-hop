@@ -11,7 +11,7 @@ import (
 )
 
 func TestAPI(t *testing.T) {
-	h := (&Server{svc: sync.New("t"), assets: fstest.MapFS{"index.html": {Data: []byte("hi")}}}).Handler()
+	h := (&Server{svc: sync.NewRunner("t", nil, nil), assets: fstest.MapFS{"index.html": {Data: []byte("hi")}}}).Handler()
 
 	get := func(method, path, host string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, nil)
@@ -23,7 +23,7 @@ func TestAPI(t *testing.T) {
 	if w := get("GET", "/api/status", "127.0.0.1:1"); w.Code != 200 || !strings.Contains(w.Body.String(), `"idle"`) {
 		t.Fatalf("status: %d %s", w.Code, w.Body)
 	}
-	if w := get("POST", "/api/sync", "127.0.0.1:1"); w.Code != 200 || !strings.Contains(w.Body.String(), "Stub sync") {
+	if w := get("POST", "/api/sync", "127.0.0.1:1"); w.Code != 200 || !strings.Contains(w.Body.String(), "No sync store configured") {
 		t.Fatalf("sync: %d %s", w.Code, w.Body)
 	}
 	if w := get("GET", "/some/route", "localhost:1"); w.Body.String() != "hi" {
