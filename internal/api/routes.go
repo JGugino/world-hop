@@ -13,6 +13,7 @@ import (
 	"github.com/JGugino/world-hopper/internal/crypt"
 	"github.com/JGugino/world-hopper/internal/license"
 	"github.com/JGugino/world-hopper/internal/sync"
+	"github.com/JGugino/world-hopper/internal/update"
 	"github.com/JGugino/world-hopper/internal/worlds"
 )
 
@@ -37,7 +38,16 @@ type Deps struct {
 	// ObjectStorage is the optional S3-compatible setup (Pro). Nil means this
 	// build or mode has none.
 	ObjectStorage ObjectStorage
+	// Updates reports whether a newer release exists. Nil means no checking.
+	Updates Updater
 }
+
+// Updater is the update notice the UI shows. *update.Checker implements it.
+type Updater interface {
+	Info() update.Info
+}
+
+var _ Updater = (*update.Checker)(nil)
 
 // Encrypter is the encryption state the UI shows and edits. *crypt.Manager
 // implements it.
@@ -131,6 +141,13 @@ func snapshotDTO(si sync.SnapshotInfo) SnapshotDTO {
 }
 
 func (s *Server) routes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/update", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Updates == nil {
+			writeJSON(w, update.Info{})
+			return
+		}
+		writeJSON(w, s.deps.Updates.Info())
+	})
 	mux.HandleFunc("GET /api/sources", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, s.sourceInfos())
 	})
