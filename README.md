@@ -47,3 +47,11 @@ providers are still to come.
 
     go test -race ./...
     go test ./internal/manifest -fuzz FuzzParse -fuzztime 30s
+
+## License
+
+The source is available under the [Functional Source License, Version 1.1, MIT Future License](LICENSE)
+(FSL-1.1-MIT). You can read, build, modify and use it for your own purposes, including contributing
+changes, but you may not offer it (or a modified version) as a competing commercial product or service,
+and the Pro license check may not be removed in redistributed builds. Each release becomes available
+under the MIT license two years after it is published.
