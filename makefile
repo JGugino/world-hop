@@ -10,7 +10,12 @@ default:
 # docs/cloud-setup.md). Supply them from the environment or CI secrets; never
 # commit them. GOOGLE_CLIENT_SECRET is optional.
 LINK_PKG = github.com/JGugino/world-hopper/internal/link
+-include .env
+export
 release:
+	@echo "Building Web View UI..."
+	@cd ui/ && pnpm build
+	@echo "Building WorldHop executable..."
 	@test -n "$(GOOGLE_CLIENT_ID)" || { echo "set GOOGLE_CLIENT_ID"; exit 1; }
 	@go build -trimpath -ldflags "-s -w \
 	  -X $(LINK_PKG).DefaultGoogleClientID=$(GOOGLE_CLIENT_ID) \
