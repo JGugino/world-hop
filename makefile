@@ -38,12 +38,26 @@ release:
 # native webview build run this target's go command on Windows with
 # CGO_ENABLED=1, a C compiler and `-tags webview` (see docs/cloud-setup.md).
 OUT_WINDOWS ?= $(OUT).exe
-release-windows:
+release-windows: syso
 	@echo "Building Web View UI..."
 	@cd ui/ && pnpm build
 	@echo "Building WorldHop Windows executable..."
 	@test -n "$(GOOGLE_CLIENT_ID)" || { echo "set GOOGLE_CLIENT_ID"; exit 1; }
 	@GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$(RELEASE_LDFLAGS) -H windowsgui" -o $(OUT_WINDOWS) ./cmd/worldhop
+
+# Windows exe icon resource (shown by Explorer and the taskbar). The generated
+# .syso is committed, so this only refreshes it; it is linked automatically
+# for windows/amd64 builds and ignored on other targets.
+SYSO = cmd/worldhop/rsrc_windows_amd64.syso
+syso:
+	@go run github.com/akavel/rsrc@v0.10.2 -ico assets/icon/worldhop.ico -arch amd64 -o $(SYSO) \
+	  || echo "rsrc unavailable; using the committed $(SYSO)"
+
+# Regenerate PNGs, .ico, favicon and preview from assets/icon/icon.svg
+# (needs Node + Playwright/Chromium), then the Windows resource.
+icons:
+	@node assets/icon/generate.cjs
+	@$(MAKE) syso
 
 # Linux and Windows release builds (UI is built once per target).
 release-all: release release-windows
@@ -55,4 +69,4 @@ package-linux: release
 package-macos: release
 	@VERSION=$(VERSION) BIN=$(OUT) sh packaging/macos.sh
 
-.PHONY: default release release-windows release-all package-linux package-macos
+.PHONY: syso icons default release release-windows release-all package-linux package-macos
