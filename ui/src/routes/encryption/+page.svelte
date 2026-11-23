@@ -191,7 +191,9 @@
 		color: #000;
 		text-shadow: none;
 		border: 2px solid #000;
-		padding: 0 7px;
+		padding: 3px 9px;
+		line-height: 1.3;
 		vertical-align: middle;
+		margin-left: 8px;
 	}
 </style>

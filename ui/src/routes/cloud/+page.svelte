@@ -253,7 +253,7 @@
 	.ok { color: var(--ok); margin: 0; }
 	.bad { color: var(--bad); }
 	p.small { margin: 0; }
-	.badge { font-size: 0.8rem; padding: 0 7px; background: var(--warn); color: #000; text-shadow: none; border: 2px solid #000; vertical-align: middle; margin-left: 6px; }
+	.badge { font-size: 0.8rem; padding: 3px 9px; line-height: 1.3; background: var(--warn); color: #000; text-shadow: none; border: 2px solid #000; vertical-align: middle; margin-left: 8px; }
 	.s3form { display: grid; gap: 12px; margin-top: 16px; }
 	.s3form label { display: grid; gap: 4px; font-size: 0.9rem; }
 	.s3form label.check { display: flex; gap: 8px; align-items: center; }
