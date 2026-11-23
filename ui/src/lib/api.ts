@@ -177,3 +177,27 @@ export const activateLicense = (key: string) =>
 	call<License>('POST', '/api/license/activate', { key });
 export const deactivateLicense = () => call<License>('POST', '/api/license/deactivate');
 export const setFreeWorld = (id: string) => call<License>('POST', '/api/license/free-world', { id });
+
+export type Encryption = {
+	/** Pro license active (needed to turn encryption on). */
+	pro: boolean;
+	enabled: boolean;
+	/** The key is loaded, so syncing works. */
+	unlocked: boolean;
+	remember: boolean;
+	/** The cloud store already has a key (set up on another computer); null = unknown. */
+	keyInStore: boolean | null;
+	error?: string;
+};
+
+export const getEncryption = () => call<Encryption>('GET', '/api/encryption');
+export const enableEncryption = (b: {
+	passphrase: string;
+	confirm: string;
+	acknowledged: boolean;
+	remember: boolean;
+}) => call<Encryption>('POST', '/api/encryption/enable', b);
+export const unlockEncryption = (passphrase: string, remember: boolean) =>
+	call<Encryption>('POST', '/api/encryption/unlock', { passphrase, remember });
+export const lockEncryption = () => call<Encryption>('POST', '/api/encryption/lock');
+export const disableEncryption = () => call<Encryption>('POST', '/api/encryption/disable');

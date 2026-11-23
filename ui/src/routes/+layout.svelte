@@ -10,6 +10,7 @@
 		{ href: '/', label: 'Worlds' },
 		{ href: '/sources', label: 'Sources' },
 		{ href: '/cloud', label: 'Cloud account' },
+		{ href: '/encryption', label: 'Encryption' },
 		{ href: '/license', label: 'License' }
 	];
 

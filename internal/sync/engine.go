@@ -53,7 +53,11 @@ type Engine struct {
 	// gate). It is checked before any push, pull or conflict resolution; a
 	// non-nil error refuses the operation. Reading status is always allowed.
 	Authorize func(worldID string) error
-	Now       func() time.Time
+	// StateScope, if set, names a sub-namespace for the "last synced" records.
+	// Encryption uses it so the plain and encrypted layouts of one store keep
+	// separate records and never mistake one for the other being newer.
+	StateScope func() string
+	Now        func() time.Time
 }
 
 // New creates an engine, loading or creating this device's id.
@@ -91,7 +95,15 @@ type state struct {
 	BaseTree string `json:"baseTree"` // its tree hash
 }
 
-func (e *Engine) statePath(id string) string { return filepath.Join(e.StateDir, "worlds", id+".json") }
+func (e *Engine) statePath(id string) string {
+	dir := filepath.Join(e.StateDir, "worlds")
+	if e.StateScope != nil {
+		if sc := e.StateScope(); sc != "" {
+			dir = filepath.Join(dir, sc)
+		}
+	}
+	return filepath.Join(dir, id+".json")
+}
 
 func (e *Engine) loadState(id string) state {
 	var s state
