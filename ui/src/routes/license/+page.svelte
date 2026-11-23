@@ -136,5 +136,5 @@
 	.ok { color: var(--ok); }
 	.bad { color: var(--bad); }
 	.warn { color: var(--warn); }
-	.field { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 1.2rem; }
+	.field { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 0.92rem; }
 </style>

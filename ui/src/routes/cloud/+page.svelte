@@ -253,12 +253,12 @@
 	.ok { color: var(--ok); margin: 0; }
 	.bad { color: var(--bad); }
 	p.small { margin: 0; }
-	.badge { font-family: var(--font-body); font-size: 1.1rem; padding: 2px 8px 1px; background: var(--warn); color: #000; text-shadow: none; border: 3px solid #000; vertical-align: middle; margin-left: 6px; }
+	.badge { font-size: 0.8rem; padding: 0 7px; background: var(--warn); color: #000; text-shadow: none; border: 2px solid #000; vertical-align: middle; margin-left: 6px; }
 	.s3form { display: grid; gap: 12px; margin-top: 16px; }
-	.s3form label { display: grid; gap: 4px; font-size: 1.15rem; }
+	.s3form label { display: grid; gap: 4px; font-size: 0.9rem; }
 	.s3form label.check { display: flex; gap: 8px; align-items: center; }
 	.s3form input[type='text'], .s3form input[type='password'] { width: 100%; box-sizing: border-box; }
 	.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-	.hint { color: var(--muted); font-size: 1.1rem; }
+	.hint { color: var(--muted); font-size: 0.8rem; }
 	@media (max-width: 560px) { .two { grid-template-columns: 1fr; } }
 </style>
