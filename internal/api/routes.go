@@ -32,7 +32,19 @@ type Deps struct {
 	// ObjectStorage is the optional S3-compatible setup (Pro). Nil means this
 	// build or mode has none.
 	ObjectStorage ObjectStorage
+	License   Licenser
 }
+
+// Licenser is the license state the UI shows and edits. *license.Manager
+// implements it.
+type Licenser interface {
+	Info() license.Info
+	Activate(ctx context.Context, key string) error
+	Deactivate() error
+	SetFreeWorld(id string) error
+}
+
+var _ Licenser = (*license.Manager)(nil)
 
 func (s *Server) providers() Providers {
 	if s.deps.Providers == nil {
@@ -189,6 +201,63 @@ func (s *Server) routes(mux *http.ServeMux) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	mux.HandleFunc("GET /api/license", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.License == nil {
+			writeJSON(w, license.Info{Tier: "free", FreeWorlds: license.FreeWorlds})
+			return
+		}
+		writeJSON(w, s.deps.License.Info())
+	})
+	mux.HandleFunc("POST /api/license/activate", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.License == nil {
+			writeErr(w, http.StatusNotImplemented, license.ErrUnavailable)
+			return
+		}
+		var body struct {
+			Key string `json:"key"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		if err := s.deps.License.Activate(r.Context(), body.Key); err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		writeJSON(w, s.deps.License.Info())
+	})
+	mux.HandleFunc("POST /api/license/deactivate", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.License == nil {
+			writeErr(w, http.StatusNotImplemented, license.ErrUnavailable)
+			return
+		}
+		if err := s.deps.License.Deactivate(); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, s.deps.License.Info())
+	})
+	mux.HandleFunc("POST /api/license/free-world", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.License == nil {
+			writeErr(w, http.StatusNotImplemented, license.ErrUnavailable)
+			return
+		}
+		var body struct {
+			ID string `json:"id"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		if _, err := s.svc.FindWorld(body.ID); err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		if err := s.deps.License.SetFreeWorld(body.ID); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, s.deps.License.Info())
+	})
+
 	mux.HandleFunc("GET /api/cloud-worlds", func(w http.ResponseWriter, r *http.Request) {
 		cw, err := s.svc.CloudWorlds(r.Context())
 		if err != nil {
@@ -290,6 +359,10 @@ func writeServiceErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, err)
 	case errors.Is(err, license.ErrProRequired):
 		writeErr(w, http.StatusPaymentRequired, err)
+	case errors.Is(err, license.ErrWorldLimit):
+		writeErr(w, http.StatusForbidden, err)
+	case errors.Is(err, license.ErrUnavailable):
+		writeErr(w, http.StatusNotImplemented, err)
 	case errors.Is(err, sync.ErrNoStore), errors.Is(err, ErrProviderUnavailable):
 		writeErr(w, http.StatusNotImplemented, err)
 	case errors.Is(err, sync.ErrWorldOpen), errors.Is(err, sync.ErrDestExists), errors.As(err, &ce):

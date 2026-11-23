@@ -25,7 +25,8 @@ import (
 	"github.com/JGugino/world-hopper/ui"
 )
 
-const version = "0.0.1"
+// version is overridden at release time with -ldflags "-X main.version=...".
+var version = "0.0.1"
 
 // listFlag collects a repeatable flag.
 type listFlag []string
@@ -77,6 +78,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	lic, err := license.New(sd)
+	if err != nil {
+		log.Fatal(err)
+	}
+	engine.Authorize = lic.Authorize
 
 	// Sources live in a config file the UI edits. On first run, seed it with the
 	// launcher folders that exist on this computer; -saves / -world add more.
@@ -117,6 +123,14 @@ func main() {
 	det := detect.New()
 	engine.IsOpen = det.WorldOpen
 	svc := sync.NewRunner(version, engine, listWorlds)
+	svc.Limited = lic.Limited
+	// Re-check a stored Pro key now and then (refunds, offline grace).
+	go func() {
+		for {
+			lic.Refresh(context.Background())
+			time.Sleep(time.Hour)
+		}
+	}()
 	svc.AutoDownload = true
 	svc.SavesFolders = func() []string {
 		var out []string
@@ -133,7 +147,7 @@ func main() {
 	if cloud != nil {
 		deps.Providers, deps.ObjectStorage = link.API{M: cloud}, link.API{M: cloud}
 	}
-	lazy := api.NewLazy(*addr, svc, ui.Assets(), deps, idleTimeout)
+	lazy := api.NewLazy(*addr, svc, ui.Assets(), api.Deps{Sources: cfg, Providers: providers, License: lic}, idleTimeout)
 
 	openView := func() {
 		url, err := lazy.Ensure()

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=WorldHop
+Comment=Keep Minecraft worlds in sync between computers
+Exec=worldhop
+Icon=worldhop
+Categories=Utility;Game;
+Terminal=false

@@ -7,6 +7,7 @@ import (
 	stdsync "sync"
 	"time"
 
+	"github.com/JGugino/world-hopper/internal/license"
 	"github.com/JGugino/world-hopper/internal/worlds"
 )
 
@@ -27,6 +28,10 @@ type Runner struct {
 	engine *Engine
 	list   func() []worlds.World
 
+	// Limited, if set, reports whether the license keeps a world from syncing
+	// (without claiming the free slot). It only affects what the UI shows;
+	// the Engine's Authorize hook is what actually enforces the limit.
+	Limited func(worldID string) bool
 	// SavesFolders returns the configured saves-folder sources: the only
 	// places a cloud world may be downloaded into. Optional.
 	SavesFolders func() []string
@@ -120,7 +125,7 @@ func (r *Runner) run(ctx context.Context, ws []worlds.World, full bool) (string,
 	if len(ws) == 0 && !(full && r.canAutoDownload()) {
 		return "No worlds found.", nil
 	}
-	var pushed, pulled, synced, open, conflicts, failed int
+	var pushed, pulled, synced, open, conflicts, failed, limited int
 	var firstErr error
 	var warnings []string
 	for _, w := range ws {
@@ -152,6 +157,8 @@ func (r *Runner) run(ctx context.Context, ws []worlds.World, full bool) (string,
 		var ce *ConflictError
 		switch {
 		case err == nil:
+		case errors.Is(err, license.ErrWorldLimit):
+			limited++
 		case errors.Is(err, ErrWorldOpen):
 			open++
 		case errors.As(err, &ce):
@@ -180,6 +187,9 @@ func (r *Runner) run(ctx context.Context, ws []worlds.World, full bool) (string,
 	}
 	if open > 0 {
 		msg += fmt.Sprintf(", %d skipped (open in Minecraft)", open)
+	}
+	if limited > 0 {
+		msg += fmt.Sprintf(", %d not synced (free version: 1 world)", limited)
 	}
 	if conflicts > 0 {
 		msg += fmt.Sprintf(", %d in conflict", conflicts)
