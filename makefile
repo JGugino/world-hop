@@ -1,11 +1,5 @@
 default:
-	@echo "Building Web View UI..."
-	@cd ui/ && pnpm build
-	@echo "Building WorldHop executable..."
-	@mkdir -p $(DIST)
-	@go build -o $(DIST)/worldhop ./cmd/worldhop
-	@echo "Starting WorldHop..."
-	@$(DIST)/worldhop -store ~/Documents/projects/claude-projects/testing-shared
+	@make release-all
 
 # Release build with the app's own IDs compiled in (see docs/cloud-setup.md and
 # docs/licensing.md). Supply them from the environment or CI secrets; never
