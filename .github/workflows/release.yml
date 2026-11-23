@@ -1,0 +1,94 @@
+name: release
+
+# Tag vX.Y.Z to build installers and attach them to a GitHub release.
+# Repository secrets (never commit these):
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (optional), GUMROAD_PRODUCT_ID,
+#   PURCHASE_URL (optional).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: pnpm install --frozen-lockfile && pnpm build
+        working-directory: ui
+      - run: go vet ./... && go test -race ./...
+
+  package:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: linux }
+          - { os: macos-latest, target: macos }
+          - { os: windows-latest, target: windows }
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GUMROAD_PRODUCT_ID: ${{ secrets.GUMROAD_PRODUCT_ID }}
+      PURCHASE_URL: ${{ secrets.PURCHASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: pnpm install --frozen-lockfile && pnpm build
+        working-directory: ui
+
+      - name: Linux (.deb, .tar.gz)
+        if: matrix.target == 'linux'
+        run: make package-linux
+      - name: macOS (.dmg)
+        if: matrix.target == 'macos'
+        run: make package-macos
+      - name: Windows (.zip)
+        if: matrix.target == 'windows'
+        shell: bash
+        run: |
+          make release OUT=worldhop.exe
+          mkdir -p dist
+          cp README.md dist/README.md
+          cp worldhop.exe dist/
+          cd dist && 7z a "WorldHop-$VERSION-windows-amd64.zip" worldhop.exe README.md
+          rm worldhop.exe README.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.target }}
+          path: |
+            dist/*.deb
+            dist/*.tar.gz
+            dist/*.dmg
+            dist/*.zip
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { pattern: installer-*, merge-multiple: true, path: dist }
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes --draft

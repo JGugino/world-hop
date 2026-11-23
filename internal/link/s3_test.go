@@ -36,7 +36,7 @@ func newS3Env(t *testing.T, pro bool) *s3env {
 	e.fake = storetest.NewFakeS3("bkt", tAccess, tSecret, "us-east-1")
 	t.Cleanup(e.fake.Close)
 	e.m = New(Config{}, &oauth.MemoryStore{}, e.dir)
-	e.m.EnableS3(e.sec, license.Func(func() bool { return *e.pro }))
+	e.m.EnableS3(e.sec, proFunc(func() bool { return *e.pro }))
 	return e
 }
 
@@ -193,7 +193,7 @@ func TestS3ChoiceSurvivesRestartAndStartLinkRefused(t *testing.T) {
 	e := newS3Env(t, true)
 	e.m.SaveS3(e.input())
 	m2 := New(Config{}, &oauth.MemoryStore{}, e.dir)
-	m2.EnableS3(e.sec, license.Static(true))
+	m2.EnableS3(e.sec, proFunc(func() bool { return true }))
 	if m2.Status().Chosen != S3 {
 		t.Fatalf("chosen = %q", m2.Status().Chosen)
 	}
@@ -204,3 +204,7 @@ func TestS3ChoiceSurvivesRestartAndStartLinkRefused(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+type proFunc func() bool
+
+func (f proFunc) Pro() bool { return f() }

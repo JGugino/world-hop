@@ -49,7 +49,11 @@ type Engine struct {
 	SnapshotsKeep int    // snapshots kept per world (default 5)
 	// IsOpen reports whether the world is in use by the game. Optional.
 	IsOpen func(worldPath string) bool
-	Now    func() time.Time
+	// Authorize, if set, decides whether a world may be synced (the license
+	// gate). It is checked before any push, pull or conflict resolution; a
+	// non-nil error refuses the operation. Reading status is always allowed.
+	Authorize func(worldID string) error
+	Now       func() time.Time
 }
 
 // New creates an engine, loading or creating this device's id.
@@ -179,6 +183,17 @@ func headNames(hs []head) []string {
 	return n
 }
 
+// check runs the checks every write operation shares: the license gate, then
+// whether the game has the world open.
+func (e *Engine) check(w worlds.World) error {
+	if e.Authorize != nil {
+		if err := e.Authorize(w.ID); err != nil {
+			return err
+		}
+	}
+	return e.checkOpen(w)
+}
+
 func (e *Engine) checkOpen(w worlds.World) error {
 	if e.IsOpen != nil && e.IsOpen(w.Path) {
 		return ErrWorldOpen
@@ -251,7 +266,7 @@ type PushResult struct {
 
 // Push uploads the local world as a new manifest. It refuses on conflict.
 func (e *Engine) Push(ctx context.Context, w worlds.World) (PushResult, error) {
-	if err := e.checkOpen(w); err != nil {
+	if err := e.check(w); err != nil {
 		return PushResult{}, err
 	}
 	if !worlds.IsWorld(w.Path) {
@@ -379,7 +394,7 @@ type PullResult struct {
 // Pull brings the newest stored version to this computer. It refuses when the
 // world is open or on conflict.
 func (e *Engine) Pull(ctx context.Context, w worlds.World) (PullResult, error) {
-	if err := e.checkOpen(w); err != nil {
+	if err := e.check(w); err != nil {
 		return PullResult{}, err
 	}
 	if err := Recover(w.Path); err != nil {
@@ -518,7 +533,7 @@ type ResolveResult struct {
 
 // Resolve settles a conflict. Cancelling is simply not calling Resolve.
 func (e *Engine) Resolve(ctx context.Context, w worlds.World, s Strategy) (ResolveResult, error) {
-	if err := e.checkOpen(w); err != nil {
+	if err := e.check(w); err != nil {
 		return ResolveResult{}, err
 	}
 	hs, err := e.heads(ctx, w.ID)

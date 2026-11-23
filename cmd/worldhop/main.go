@@ -25,7 +25,8 @@ import (
 	"github.com/JGugino/world-hopper/ui"
 )
 
-const version = "0.0.1"
+// version is overridden at release time with -ldflags "-X main.version=...".
+var version = "0.0.1"
 
 // listFlag collects a repeatable flag.
 type listFlag []string
@@ -68,14 +69,20 @@ func main() {
 		}
 		cloud = link.New(ccfg, oauth.KeyringStore{Service: "worldhop"}, sd)
 		cloud.OpenURL = window.OpenBrowser
-		// S3-compatible storage is a Pro feature; its secret key lives in the
-		// keychain. The licence check is a stand-in until step 6 (see license).
-		cloud.EnableS3(link.KeyringSecrets{Service: "worldhop"}, license.FromEnv())
 		st = cloud
 	}
 	engine, err := sync.New(st, sd)
 	if err != nil {
 		log.Fatal(err)
+	}
+	lic, err := license.New(sd)
+	if err != nil {
+		log.Fatal(err)
+	}
+	engine.Authorize = lic.Authorize
+	if cloud != nil {
+		// S3-compatible storage is a Pro feature; its secret key lives in the keychain.
+		cloud.EnableS3(link.KeyringSecrets{Service: "worldhop"}, lic)
 	}
 
 	// Sources live in a config file the UI edits. On first run, seed it with the
@@ -117,6 +124,14 @@ func main() {
 	det := detect.New()
 	engine.IsOpen = det.WorldOpen
 	svc := sync.NewRunner(version, engine, listWorlds)
+	svc.Limited = lic.Limited
+	// Re-check a stored Pro key now and then (refunds, offline grace).
+	go func() {
+		for {
+			lic.Refresh(context.Background())
+			time.Sleep(time.Hour)
+		}
+	}()
 	svc.AutoDownload = true
 	svc.SavesFolders = func() []string {
 		var out []string
@@ -129,7 +144,7 @@ func main() {
 	}
 	// The HTTP server is started on demand (Open Web View) and stopped again after
 	// idleTimeout without requests, so nothing listens while the UI isn't in use.
-	deps := api.Deps{Sources: cfg, Providers: api.StubProviders{}} // -store mode has no cloud accounts
+	deps := api.Deps{Sources: cfg, Providers: api.StubProviders{}, License: lic} // -store mode has no cloud accounts
 	if cloud != nil {
 		deps.Providers, deps.ObjectStorage = link.API{M: cloud}, link.API{M: cloud}
 	}

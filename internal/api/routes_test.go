@@ -95,6 +95,37 @@ func TestSettingsAPI(t *testing.T) {
 	}
 }
 
+func TestLicenseAPI(t *testing.T) {
+	dir := t.TempDir()
+	lic, err := license.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng, _ := sync.New(localdir.New(filepath.Join(dir, "shared")), filepath.Join(dir, "state"))
+	svc := sync.NewRunner("t", eng, func() []worlds.World { return []worlds.World{{ID: "W1", Name: "W1"}} })
+	h := (&Server{svc: svc, deps: Deps{License: lic}, assets: fstest.MapFS{"index.html": {Data: []byte("hi")}}}).Handler()
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Host = "127.0.0.1:1"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := do("GET", "/api/license", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"tier":"free"`) {
+		t.Fatalf("get: %d %s", w.Code, w.Body)
+	}
+	// Test builds have no Gumroad product ID, so activation is unavailable.
+	if w := do("POST", "/api/license/activate", `{"key":"x"}`); w.Code != 501 {
+		t.Fatalf("activate: %d %s", w.Code, w.Body)
+	}
+	if w := do("POST", "/api/license/free-world", `{"id":"nope"}`); w.Code != 404 {
+		t.Fatalf("unknown free world: %d", w.Code)
+	}
+	if w := do("POST", "/api/license/free-world", `{"id":"W1"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"freeWorld":"W1"`) {
+		t.Fatalf("free world: %d %s", w.Code, w.Body)
+	}
+}
+
 func TestCloudWorldsAPI(t *testing.T) {
 	dir := t.TempDir()
 	shared := filepath.Join(dir, "shared")

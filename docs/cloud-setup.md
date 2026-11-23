@@ -76,5 +76,5 @@ with a provider; the user enters their own details on the **Cloud account** page
 list, read and write permission on the bucket. Objects use the same layout as the Google Drive
 store (`packs/<sha256>`, `worlds/<id>/manifest-….json`) under the optional folder.
 
-Pro gating goes through `internal/license`. Until licence-key verification exists (plan.md step 6),
-`license.FromEnv` unlocks Pro when `WORLDHOP_PRO=1`; swap it for the real checker in `main.go`.
+Pro gating uses the license check in `internal/license` (see docs/licensing.md): saving, testing, choosing
+S3, and every store call require Pro, so a lapsed license stops S3 syncing.
