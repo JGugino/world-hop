@@ -1,14 +1,7 @@
 // Package tray provides the system tray icon and menu.
 package tray
 
-import (
-	_ "embed"
-
-	"fyne.io/systray"
-)
-
-//go:embed icon.png
-var icon []byte
+import "fyne.io/systray"
 
 type Handlers struct {
 	OpenView  func()
