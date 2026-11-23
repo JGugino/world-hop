@@ -22,6 +22,8 @@ export type World = {
 	launcher?: string;
 	status: WorldStatus;
 	open: boolean;
+	/** The free version is already syncing a different world. */
+	locked?: boolean;
 	error?: string;
 };
 
@@ -55,6 +57,20 @@ export type Snapshot = {
 	id: string;
 	reason: string;
 	createdAt: string | null;
+};
+
+export type License = {
+	tier: 'free' | 'pro';
+	freeWorlds: number;
+	freeWorld?: string;
+	/** Masked. */
+	key?: string;
+	verifiedAt?: string;
+	/** Set when Pro is running on offline grace. */
+	graceEnds?: string;
+	canActivate: boolean;
+	purchaseUrl?: string;
+	error?: string;
 };
 
 export type ProviderId = 'gdrive';
@@ -130,3 +146,9 @@ export const unlinkProvider = (id: ProviderId) =>
 export function sayBye() {
 	navigator.sendBeacon('/api/bye');
 }
+
+export const getLicense = () => call<License>('GET', '/api/license');
+export const activateLicense = (key: string) =>
+	call<License>('POST', '/api/license/activate', { key });
+export const deactivateLicense = () => call<License>('POST', '/api/license/deactivate');
+export const setFreeWorld = (id: string) => call<License>('POST', '/api/license/free-world', { id });

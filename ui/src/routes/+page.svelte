@@ -220,6 +220,12 @@
 				<span class="badge {tone[w.status]}">{labels[w.status]}</span>
 			</div>
 
+			{#if w.locked}
+				<p class="note">
+					The free version syncs 1 world, and it is set to a different one.
+					<a href="/license">Upgrade to Pro or change the free world</a>.
+				</p>
+			{/if}
 			{#if w.open}
 				<p class="note">Open in Minecraft. It is synced after you close it.</p>
 			{/if}
@@ -247,7 +253,7 @@
 			{/if}
 
 			<div class="row">
-				<button class="secondary" disabled={busy === w.id || w.open} onclick={() => sync(w)}>
+				<button class="secondary" disabled={busy === w.id || w.open || w.locked} onclick={() => sync(w)}>
 					{busy === w.id ? 'Working…' : 'Sync this world'}
 				</button>
 				<button class="secondary" onclick={() => toggleSnaps(w)}>
