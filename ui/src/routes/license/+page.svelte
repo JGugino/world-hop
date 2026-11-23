@@ -17,7 +17,10 @@
 	let busy = $state(false);
 	let confirmRemove = $state(false);
 
-	const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+	const msg = (e: unknown) => {
+		const m = e instanceof Error ? e.message : String(e);
+		return m.charAt(0).toUpperCase() + m.slice(1);
+	};
 
 	async function load() {
 		try {
