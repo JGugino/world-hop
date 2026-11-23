@@ -232,7 +232,13 @@
 			{#if w.open}
 				<p class="note">Open in Minecraft. It is synced after you close it.</p>
 			{/if}
-			{#if w.error}<p class="note bad">{w.error}</p>{/if}
+			{#if w.error}
+				<p class="note bad">
+					{w.error}.
+					{#if w.hint}{w.hint}{/if}
+					{#if w.fix && w.fix !== '/'}<a href={w.fix}>Fix it</a>{/if}
+				</p>
+			{/if}
 
 			{#if w.status === 'conflict'}
 				<div class="conflict">

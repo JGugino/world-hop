@@ -3,7 +3,8 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { sayBye } from '$lib/api';
-	import { status } from '$lib/status.svelte';
+	import { status, ago } from '$lib/status.svelte';
+	import StatusPanel from '$lib/StatusPanel.svelte';
 
 	let { children } = $props();
 
@@ -14,15 +15,6 @@
 		{ href: '/encryption', label: 'Encryption' },
 		{ href: '/license', label: 'License' }
 	];
-
-	function ago(iso: string | null) {
-		if (!iso) return 'never';
-		const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-		if (s < 60) return 'just now';
-		if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-		if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-		return new Date(iso).toLocaleDateString();
-	}
 
 	onMount(() => {
 		status.refresh();
@@ -63,10 +55,7 @@
 
 <main class="wrap">
 	{#if status.error}<p class="banner err">Can't reach WorldHop: {status.error}</p>{/if}
-	{#if s}
-		<p class="banner">{s.lastResult}</p>
-		{#each s.warnings ?? [] as w}<p class="banner warn">{w}</p>{/each}
-	{/if}
+	{#if s}<StatusPanel status={s} />{/if}
 	{@render children()}
 	<footer>
 		WorldHop {s?.version ?? ''} is not an official Minecraft product and is not affiliated with Mojang
@@ -106,7 +95,6 @@
 		background: var(--panel); border: 2px solid #000; box-shadow: inset 2px 2px 0 var(--panel-hi), inset -2px -2px 0 var(--panel-lo);
 		padding: 8px 12px; margin: 14px 0 0; font-size: 0.92rem;
 	}
-	.banner.warn { border-left: 6px solid var(--warn); }
 	.banner.err { border-left: 6px solid var(--bad); color: var(--bad); }
 	footer { color: #7d858d; font-size: 0.8rem; margin-top: 32px; }
 </style>

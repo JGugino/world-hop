@@ -19,7 +19,7 @@ import (
 var (
 	// ErrLocked: encryption is on but no key is loaded (after a restart without
 	// "remember", or after locking).
-	ErrLocked = errors.New("encryption is on but locked: enter your passphrase under Encryption")
+	ErrLocked = store.ErrEncryptionLocked
 	// ErrProRequired: turning encryption on is a Pro feature.
 	ErrProRequired = license.ErrProRequired
 	// ErrNotConfirmed: creating a new key needs the passphrase twice and an

@@ -31,8 +31,12 @@ type WorldInfo struct {
 	Status string `json:"status"`
 	Open   bool   `json:"open"`
 	// Locked: the free version is already syncing a different world.
-	Locked bool   `json:"locked,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Locked bool `json:"locked,omitempty"`
+	// Error is a short plain-language reason the status is unknown; Hint says
+	// what to do about it and Fix is the UI page where to do it.
+	Error string `json:"error,omitempty"`
+	Hint  string `json:"hint,omitempty"`
+	Fix   string `json:"fix,omitempty"`
 }
 
 // Worlds lists every world in the configured sources with its sync status.
@@ -46,13 +50,15 @@ func (r *Runner) Worlds(ctx context.Context) []WorldInfo {
 		info := WorldInfo{ID: w.ID, Name: w.Name, Path: w.Path, Launcher: w.Launcher, Status: "unknown"}
 		info.Locked = r.Limited != nil && r.Limited(w.ID)
 		if r.engine == nil {
-			info.Error = ErrNoStore.Error()
+			p := Explain(ErrNoStore)
+			info.Error, info.Hint, info.Fix = p.Title, p.Action, p.Fix
 		} else {
 			if r.engine.IsOpen != nil {
 				info.Open = r.engine.IsOpen(w.Path)
 			}
 			if st, err := r.engine.Status(ctx, w); err != nil {
-				info.Error = err.Error()
+				p := Explain(err)
+				info.Error, info.Hint, info.Fix = p.Title, p.Action, p.Fix
 			} else {
 				info.Status = string(st)
 			}
@@ -170,7 +176,7 @@ func (r *Runner) CloudWorlds(ctx context.Context) ([]CloudWorld, error) {
 		cw := CloudWorld{ID: id, Name: id, Seen: r.engine.HasState(id)}
 		rw, err := r.engine.Remote(ctx, id)
 		if err != nil {
-			cw.Error = err.Error()
+			cw.Error = Explain(err).Title
 		} else {
 			t := rw.UpdatedAt
 			cw.UpdatedAt, cw.Size, cw.Files, cw.Diverged = &t, rw.Size, rw.Files, rw.Diverged
@@ -243,6 +249,7 @@ func (r *Runner) autoDownload(ctx context.Context, local []worlds.World) (int, e
 		if rw, err := r.engine.Remote(ctx, id); err != nil || rw.Diverged {
 			continue // leave it for the user to decide
 		}
+		r.setProgress(&Progress{World: id, Action: "downloading", Done: n, Total: len(ids)})
 		_, err := r.engine.Download(ctx, id, dir)
 		switch {
 		case err == nil:

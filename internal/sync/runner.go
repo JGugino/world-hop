@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	stdsync "sync"
 	"time"
 
-	"github.com/JGugino/world-hopper/internal/license"
 	"github.com/JGugino/world-hopper/internal/worlds"
 )
 
@@ -16,10 +16,37 @@ type RunnerStatus struct {
 	State      string     `json:"state"` // "idle" | "syncing"
 	LastSync   *time.Time `json:"lastSync"`
 	LastResult string     `json:"lastResult"`
+	// Outcome summarises the last pass: "" (none yet), "ok", "waiting" (only
+	// waiting for Minecraft to close), "attention" (needs a choice) or "error".
+	Outcome string `json:"outcome"`
+	// Result counts what the last pass did.
+	Result PassResult `json:"result"`
+	// Progress says what is happening right now; set only while syncing.
+	Progress *Progress `json:"progress"`
+	// Problems explains, in plain words, what kept the last pass from
+	// finishing, grouped by kind, each with the worlds it affects.
+	Problems []Problem `json:"problems"`
 	// Warnings lists worlds that need attention, e.g. a newer version exists
 	// but the world is open in Minecraft.
 	Warnings []string `json:"warnings"`
 	Version  string   `json:"version"`
+}
+
+// PassResult counts what a sync pass did.
+type PassResult struct {
+	Total      int `json:"total"` // worlds looked at
+	Uploaded   int `json:"uploaded"`
+	Downloaded int `json:"downloaded"` // updated from the cloud, plus new worlds fetched
+	UpToDate   int `json:"upToDate"`
+}
+
+// Progress is the step a running pass is on.
+type Progress struct {
+	World string `json:"world"`
+	// Action is "checking", "uploading" or "downloading".
+	Action string `json:"action"`
+	Done   int    `json:"done"`  // worlds finished before this one
+	Total  int    `json:"total"` // worlds in this pass
 }
 
 // Runner drives the Engine for the tray and local API: it tracks sync state
@@ -53,11 +80,31 @@ func NewRunner(version string, engine *Engine, list func() []worlds.World) *Runn
 	if engine == nil {
 		msg = "No sync store configured yet."
 	}
-	return &Runner{
+	r := &Runner{
 		engine: engine,
 		list:   list,
 		status: RunnerStatus{State: "idle", LastResult: msg, Version: version},
 	}
+	if engine != nil {
+		engine.OnPhase = r.setPhase
+	}
+	return r
+}
+
+// setPhase is the Engine's OnPhase hook: it moves the running pass from
+// "checking" to "uploading" or "downloading" once the Engine knows which.
+func (r *Runner) setPhase(_, phase string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.status.Progress != nil {
+		r.status.Progress.Action = phase
+	}
+}
+
+func (r *Runner) setProgress(p *Progress) {
+	r.mu.Lock()
+	r.status.Progress = p
+	r.mu.Unlock()
 }
 
 // Status returns a snapshot of the current state.
@@ -104,91 +151,170 @@ func (r *Runner) listWorlds() []worlds.World {
 func (r *Runner) runPass(ctx context.Context, ws []worlds.World, full bool) RunnerStatus {
 	r.mu.Lock()
 	r.status.State = "syncing"
+	r.status.Progress = &Progress{Action: "checking", Total: len(ws)}
 	r.mu.Unlock()
 
-	result, warnings := r.run(ctx, ws, full)
+	out := r.run(ctx, ws, full)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now()
 	r.status.State = "idle"
-	r.status.LastSync = &now
-	r.status.LastResult = result
-	r.status.Warnings = warnings
+	r.status.Progress = nil
+	// "Last sync" means the last time something actually synced, so a pass
+	// that only hit errors (offline, signed out) leaves it alone.
+	if out.outcome != "error" || out.result.Uploaded+out.result.Downloaded+out.result.UpToDate > 0 {
+		r.status.LastSync = &now
+	}
+	r.status.LastResult = out.message
+	r.status.Outcome = out.outcome
+	r.status.Result = out.result
+	r.status.Problems = out.problems
+	r.status.Warnings = out.warnings
 	return r.status
 }
 
-func (r *Runner) run(ctx context.Context, ws []worlds.World, full bool) (string, []string) {
+// passOutcome is what one pass found.
+type passOutcome struct {
+	message  string
+	outcome  string
+	result   PassResult
+	problems []Problem
+	warnings []string
+}
+
+// globalKinds are problems that would hit every world the same way (no
+// connection, signed out, storage full...), so the pass stops at the first
+// instead of retrying each world for minutes.
+var globalKinds = map[string]bool{
+	ProblemOffline: true, ProblemAuth: true, ProblemNotLinked: true, ProblemQuota: true,
+	ProblemBusy: true, ProblemServer: true, ProblemLocked: true, ProblemKey: true,
+	ProblemPro: true, ProblemStorageSetup: true,
+}
+
+// problemList groups problems by kind, keeping first-seen order.
+type problemList struct {
+	list []Problem
+	idx  map[string]int
+}
+
+func (l *problemList) add(p Problem, world string) {
+	if l.idx == nil {
+		l.idx = map[string]int{}
+	}
+	i, ok := l.idx[p.Kind]
+	if !ok {
+		i = len(l.list)
+		l.idx[p.Kind] = i
+		l.list = append(l.list, p)
+		l.list[i].Worlds = nil
+	}
+	if world != "" {
+		l.list[i].Worlds = append(l.list[i].Worlds, world)
+	}
+}
+
+func (r *Runner) run(ctx context.Context, ws []worlds.World, full bool) passOutcome {
 	if r.engine == nil {
-		return "No sync store configured yet.", nil
+		return passOutcome{message: "No sync store configured yet.", outcome: "attention",
+			problems: []Problem{Explain(ErrNoStore)}}
 	}
 	if len(ws) == 0 && !(full && r.canAutoDownload()) {
-		return "No worlds found.", nil
+		return passOutcome{message: "No worlds found.", outcome: "attention", problems: []Problem{{
+			Kind: "no-worlds", Level: LevelWarn,
+			Title:  "WorldHop didn't find any Minecraft worlds",
+			Action: "Add your saves folder on the Sources tab.",
+			Fix:    "/sources"}}}
 	}
-	var pushed, pulled, synced, open, conflicts, failed, limited int
-	var firstErr error
+	var res PassResult
+	res.Total = len(ws)
+	var probs problemList
 	var warnings []string
-	for _, w := range ws {
+	var stopped bool
+	for i, w := range ws {
 		if ctx.Err() != nil {
-			return "Sync cancelled.", warnings
+			return passOutcome{message: "Sync cancelled.", outcome: "ok", result: res, problems: probs.list, warnings: warnings}
 		}
-		res, err := r.engine.Sync(ctx, w)
+		r.setProgress(&Progress{World: w.Name, Action: "checking", Done: i, Total: len(ws)})
+		sr, err := r.engine.Sync(ctx, w)
 		if err == nil || errors.Is(err, ErrWorldOpen) {
 			switch {
-			case res.Pushed:
-				pushed++
-			case res.Pulled:
-				pulled++
-			case res.Status == StatusConflict:
-				conflicts++
-			case res.Status == StatusRemoteAhead && err != nil:
+			case sr.Pushed:
+				res.Uploaded++
+			case sr.Pulled:
+				res.Downloaded++
+			case sr.Status == StatusConflict:
+				probs.add(Explain(&ConflictError{WorldID: w.ID}), w.Name)
+			case sr.Status == StatusRemoteAhead && err != nil:
 				warnings = append(warnings, fmt.Sprintf("%s has a newer version in the cloud but is open in Minecraft. Close it to update.", w.Name))
 			case err == nil:
-				synced++ // up to date, or a cloud-only world with no local copy
+				res.UpToDate++ // up to date, or a cloud-only world with no local copy
 			}
 		}
-		var ce *ConflictError
+		if err == nil {
+			continue
+		}
+		p := Explain(err)
+		if globalKinds[p.Kind] {
+			probs.add(p, "")
+			stopped = true
+			break
+		}
+		probs.add(p, w.Name)
+	}
+	if full && ctx.Err() == nil && !stopped {
+		n, err := r.autoDownload(ctx, ws)
+		res.Downloaded += n
+		if err != nil {
+			probs.add(Explain(err), "")
+		}
+	}
+	return passOutcome{
+		message:  summarize(res),
+		outcome:  outcomeOf(probs.list),
+		result:   res,
+		problems: probs.list,
+		warnings: warnings,
+	}
+}
+
+func outcomeOf(ps []Problem) string {
+	out := "ok"
+	for _, p := range ps {
 		switch {
-		case err == nil:
-		case errors.Is(err, license.ErrWorldLimit):
-			limited++
-		case errors.Is(err, ErrWorldOpen):
-			open++
-		case errors.As(err, &ce):
-			conflicts++
-		default:
-			failed++
-			if firstErr == nil {
-				firstErr = fmt.Errorf("%s: %w", w.Name, err)
-			}
+		case p.Level == LevelError:
+			return "error"
+		case p.Level == LevelWarn:
+			out = "attention"
+		case out == "ok":
+			out = "waiting"
 		}
 	}
-	var downloaded int
-	if full && ctx.Err() == nil {
-		var dlErr error
-		downloaded, dlErr = r.autoDownload(ctx, ws)
-		if dlErr != nil {
-			failed++
-			if firstErr == nil {
-				firstErr = dlErr
-			}
-		}
+	return out
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
 	}
-	msg := fmt.Sprintf("Synced %d world(s): %d pushed, %d pulled, %d up to date", len(ws), pushed, pulled, synced)
-	if downloaded > 0 {
-		msg += fmt.Sprintf(", %d downloaded from the cloud", downloaded)
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+// summarize is the one-line result of a pass, e.g. "1 uploaded, 2 up to date."
+// Anything that went wrong is in Problems, not here.
+func summarize(r PassResult) string {
+	var parts []string
+	if r.Uploaded > 0 {
+		parts = append(parts, fmt.Sprintf("%d uploaded", r.Uploaded))
 	}
-	if open > 0 {
-		msg += fmt.Sprintf(", %d skipped (open in Minecraft)", open)
+	if r.Downloaded > 0 {
+		parts = append(parts, fmt.Sprintf("%d downloaded", r.Downloaded))
 	}
-	if limited > 0 {
-		msg += fmt.Sprintf(", %d not synced (free version: 1 world)", limited)
+	if r.UpToDate > 0 {
+		parts = append(parts, fmt.Sprintf("%d up to date", r.UpToDate))
 	}
-	if conflicts > 0 {
-		msg += fmt.Sprintf(", %d in conflict", conflicts)
+	if len(parts) == 0 {
+		return fmt.Sprintf("Checked %s.", plural(r.Total, "world", "worlds"))
 	}
-	if failed > 0 {
-		msg += fmt.Sprintf(", %d failed (%v)", failed, firstErr)
-	}
-	return msg + ".", warnings
+	return "Synced: " + strings.Join(parts, ", ") + "."
 }

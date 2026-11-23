@@ -38,14 +38,14 @@ import (
 
 var (
 	// ErrWrongPassphrase: the passphrase does not match this store's key header.
-	ErrWrongPassphrase = errors.New("wrong passphrase")
+	ErrWrongPassphrase = store.ErrWrongPassphrase
 	// ErrTampered: data failed authentication. It was modified, corrupted, or
 	// was encrypted with a different key.
-	ErrTampered = errors.New("encrypted data failed its integrity check")
+	ErrTampered = store.ErrTampered
 	// ErrNoKey: the store has no key header yet (encryption was never set up).
-	ErrNoKey = errors.New("this store has no encryption key yet")
+	ErrNoKey = store.ErrNoKey
 	// ErrBadHeader: the key header is malformed or asks for unreasonable cost.
-	ErrBadHeader = errors.New("unreadable encryption key header")
+	ErrBadHeader = store.ErrBadHeader
 	// ErrWeakPassphrase: too short.
 	ErrWeakPassphrase = errors.New("choose a longer passphrase (at least 10 characters)")
 )

@@ -38,7 +38,7 @@ var (
 	ErrUnknownProvider = errors.New("link: unknown provider")
 	ErrNotConfigured   = errors.New("link: provider has no client id configured")
 	// ErrNotLinked is returned by store calls when no usable account is linked.
-	ErrNotLinked = errors.New("link: no cloud account linked")
+	ErrNotLinked = store.ErrNotLinked
 )
 
 // ProviderStatus describes one provider.

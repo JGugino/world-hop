@@ -40,5 +40,8 @@ func Run(h Handlers, onReady func()) {
 	}, nil)
 }
 
+// SetStatus updates the tray icon's hover text. Call it after the tray is up.
+func SetStatus(text string) { systray.SetTooltip(text) }
+
 // Quit stops the tray loop.
 func Quit() { systray.Quit() }

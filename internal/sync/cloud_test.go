@@ -273,7 +273,7 @@ func TestDivergedWorldNotAutoDownloaded(t *testing.T) {
 	if _, err := rc.DownloadWorld(ctx, "Survival", saves); err != nil {
 		t.Fatal(err)
 	}
-	if st := rc.ForceSync(ctx); !strings.Contains(st.LastResult, "1 in conflict") {
-		t.Fatalf("result = %q", st.LastResult)
+	if st := rc.ForceSync(ctx); len(st.Problems) != 1 || st.Problems[0].Kind != ProblemConflict || st.Outcome != "attention" {
+		t.Fatalf("result = %+v", st)
 	}
 }

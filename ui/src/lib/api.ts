@@ -1,7 +1,36 @@
+export type ProblemLevel = 'info' | 'warn' | 'error';
+
+/** Something that kept a sync from finishing, in plain words. */
+export type Problem = {
+	kind: string;
+	level: ProblemLevel;
+	title: string;
+	/** What to do about it. */
+	action?: string;
+	/** The page where the user can fix it, e.g. "/cloud". */
+	fix?: string;
+	/** The raw technical message, for a "Details" fold-out. */
+	detail?: string;
+	worlds?: string[] | null;
+};
+
+export type Progress = {
+	world: string;
+	action: 'checking' | 'uploading' | 'downloading';
+	/** Worlds finished before this one. */
+	done: number;
+	total: number;
+};
+
 export type Status = {
 	state: 'idle' | 'syncing';
 	lastSync: string | null;
 	lastResult: string;
+	/** '' until the first sync. */
+	outcome: '' | 'ok' | 'waiting' | 'attention' | 'error';
+	result: { total: number; uploaded: number; downloaded: number; upToDate: number };
+	progress: Progress | null;
+	problems: Problem[] | null;
 	warnings: string[] | null;
 	version: string;
 };
@@ -24,7 +53,11 @@ export type World = {
 	open: boolean;
 	/** The free version is already syncing a different world. */
 	locked?: boolean;
+	/** Why the status is unknown, in plain words. */
 	error?: string;
+	/** What to do about it, and the page where to do it. */
+	hint?: string;
+	fix?: string;
 };
 
 export type CloudWorld = {
@@ -118,7 +151,7 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
 		let msg = `${method} ${url}: ${r.status}`;
 		try {
 			const j = await r.json();
-			if (j?.error) msg = j.error;
+			if (j?.error) msg = j.action ? `${j.error}. ${j.action}` : j.error;
 		} catch {
 			/* keep the default message */
 		}

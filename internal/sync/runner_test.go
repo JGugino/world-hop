@@ -25,7 +25,7 @@ func TestRunnerForceSync(t *testing.T) {
 	}
 	r := NewRunner("t", e, list)
 	st := r.ForceSync(context.Background())
-	if st.State != "idle" || st.LastSync == nil || !strings.Contains(st.LastResult, "1 pushed") {
+	if st.State != "idle" || st.LastSync == nil || !strings.Contains(st.LastResult, "1 uploaded") {
 		t.Fatalf("first sync: %+v", st)
 	}
 	st = r.ForceSync(context.Background())

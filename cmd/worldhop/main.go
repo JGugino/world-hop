@@ -183,5 +183,17 @@ func main() {
 		OpenView:  openView,
 		ForceSync: func() { svc.ForceSync(context.Background()) },
 		Exit:      func() { lazy.Close() },
-	}, nil)
+	}, func() {
+		// Keep the tray's hover text in step with the sync status.
+		go func() {
+			var last string
+			for {
+				if h := svc.Status().Headline(time.Now()); h != last {
+					last = h
+					tray.SetStatus(h)
+				}
+				time.Sleep(2 * time.Second)
+			}
+		}()
+	})
 }

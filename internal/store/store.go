@@ -9,6 +9,15 @@ import (
 
 var (
 	ErrNotFound = errors.New("store: not found")
+	// ErrNotLinked: no cloud account is linked to store anything in.
+	ErrNotLinked = errors.New("link: no cloud account linked")
+	// Encryption errors live here, not in package crypt, so callers that only
+	// explain them (the sync engine) need not import crypt. crypt re-exports them.
+	ErrEncryptionLocked = errors.New("encryption is on but locked: enter your passphrase under Encryption")
+	ErrWrongPassphrase  = errors.New("wrong passphrase")
+	ErrTampered         = errors.New("encrypted data failed its integrity check")
+	ErrNoKey            = errors.New("this store has no encryption key yet")
+	ErrBadHeader        = errors.New("unreadable encryption key header")
 	// ErrExists is returned by PutManifest when the name is taken.
 	ErrExists = errors.New("store: already exists")
 )

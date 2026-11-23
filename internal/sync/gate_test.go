@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/JGugino/world-hopper/internal/license"
@@ -45,8 +44,8 @@ func TestRunnerReportsLimitedWorlds(t *testing.T) {
 	r := NewRunner("t", a.e, func() []worlds.World { return []worlds.World{a.w} })
 	r.Limited = func(string) bool { return true }
 	st := r.ForceSync(ctx)
-	if want := "1 not synced (free version: 1 world)"; !strings.Contains(st.LastResult, want) {
-		t.Fatalf("result %q", st.LastResult)
+	if len(st.Problems) != 1 || st.Problems[0].Kind != ProblemLimit || st.Problems[0].Fix != "/license" {
+		t.Fatalf("result %+v", st)
 	}
 	if wi := r.Worlds(ctx); !wi[0].Locked {
 		t.Fatal("world should be marked locked")
