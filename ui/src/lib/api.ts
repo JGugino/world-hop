@@ -57,7 +57,7 @@ export type Snapshot = {
 	createdAt: string | null;
 };
 
-export type ProviderId = 'gdrive';
+export type ProviderId = 'gdrive' | 's3';
 
 export type Provider = {
 	id: ProviderId;
@@ -70,6 +70,26 @@ export type Provider = {
 	account?: string;
 	/** e.g. access was revoked and the user needs to reconnect. */
 	error?: string;
+	/** Needs a Pro licence. */
+	pro?: boolean;
+	/** Pro, and this computer has no licence. */
+	locked?: boolean;
+};
+
+export type S3Config = {
+	endpoint: string;
+	region: string;
+	bucket: string;
+	prefix: string;
+	pathStyle: boolean;
+	accessKey: string;
+	/** A secret key is stored in the system keychain. It is never sent to the page. */
+	hasSecret: boolean;
+};
+
+export type S3Input = Omit<S3Config, 'hasSecret'> & {
+	/** Leave empty to keep the stored secret. */
+	secretKey: string;
 };
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -124,6 +144,11 @@ export const linkProvider = (id: ProviderId) =>
 	call<{ url?: string }>('POST', `/api/providers/${id}/link`);
 export const unlinkProvider = (id: ProviderId) =>
 	call<void>('POST', `/api/providers/${id}/unlink`);
+
+export const getS3 = () => call<S3Config>('GET', '/api/s3');
+export const saveS3 = (in_: S3Input) => call<S3Config>('PUT', '/api/s3', in_);
+export const testS3 = (in_: S3Input) =>
+	call<{ ok: boolean; error?: string }>('POST', '/api/s3/test', in_);
 
 // Tell the server this page is going away; it stops itself after a short grace
 // period unless something else (e.g. a reload) talks to it first.

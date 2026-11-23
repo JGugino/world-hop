@@ -13,6 +13,7 @@ import (
 	"github.com/JGugino/world-hopper/internal/api"
 	"github.com/JGugino/world-hopper/internal/config"
 	"github.com/JGugino/world-hopper/internal/detect"
+	"github.com/JGugino/world-hopper/internal/license"
 	"github.com/JGugino/world-hopper/internal/link"
 	"github.com/JGugino/world-hopper/internal/oauth"
 	"github.com/JGugino/world-hopper/internal/store"
@@ -67,6 +68,9 @@ func main() {
 		}
 		cloud = link.New(ccfg, oauth.KeyringStore{Service: "worldhop"}, sd)
 		cloud.OpenURL = window.OpenBrowser
+		// S3-compatible storage is a Pro feature; its secret key lives in the
+		// keychain. The licence check is a stand-in until step 6 (see license).
+		cloud.EnableS3(link.KeyringSecrets{Service: "worldhop"}, license.FromEnv())
 		st = cloud
 	}
 	engine, err := sync.New(st, sd)
@@ -125,11 +129,11 @@ func main() {
 	}
 	// The HTTP server is started on demand (Open Web View) and stopped again after
 	// idleTimeout without requests, so nothing listens while the UI isn't in use.
-	var providers api.Providers = api.StubProviders{} // -store mode has no cloud accounts
+	deps := api.Deps{Sources: cfg, Providers: api.StubProviders{}} // -store mode has no cloud accounts
 	if cloud != nil {
-		providers = link.API{M: cloud}
+		deps.Providers, deps.ObjectStorage = link.API{M: cloud}, link.API{M: cloud}
 	}
-	lazy := api.NewLazy(*addr, svc, ui.Assets(), api.Deps{Sources: cfg, Providers: providers}, idleTimeout)
+	lazy := api.NewLazy(*addr, svc, ui.Assets(), deps, idleTimeout)
 
 	openView := func() {
 		url, err := lazy.Ensure()
