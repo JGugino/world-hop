@@ -2,7 +2,7 @@
 	import '$lib/theme.css';
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { sayBye } from '$lib/api';
+	import { sayBye, getUpdate, type UpdateInfo } from '$lib/api';
 	import { status } from '$lib/status.svelte';
 
 	let { children } = $props();
@@ -24,7 +24,26 @@
 		return new Date(iso).toLocaleDateString();
 	}
 
+	// Update notice: checked once per page load (the server checks GitHub at most
+	// daily). Dismissing hides it for that version only.
+	let update = $state<UpdateInfo | null>(null);
+	let dismissed = $state('');
+	function dismissUpdate() {
+		dismissed = update?.latest ?? '';
+		try {
+			localStorage.setItem('dismissedUpdate', dismissed);
+		} catch {
+			/* private mode: it just comes back next time */
+		}
+	}
+
 	onMount(() => {
+		try {
+			dismissed = localStorage.getItem('dismissedUpdate') ?? '';
+		} catch {
+			/* ignore */
+		}
+		getUpdate().then((u) => (update = u), () => {});
 		status.refresh();
 		const t = setInterval(() => status.refresh(), 3000);
 		window.addEventListener('pagehide', sayBye);
@@ -62,6 +81,15 @@
 </header>
 
 <main class="wrap">
+	{#if update?.available && update.latest !== dismissed && update.url}
+		<p class="banner update">
+			<span>WorldHop {update.latest} is available (you have {update.current}).</span>
+			<span class="acts">
+				<a href={update.url} target="_blank" rel="noopener noreferrer">View download</a>
+				<button class="x" onclick={dismissUpdate} aria-label="Dismiss update notice">Not now</button>
+			</span>
+		</p>
+	{/if}
 	{#if status.error}<p class="banner err">Can't reach WorldHop: {status.error}</p>{/if}
 	{#if s}
 		<p class="banner">{s.lastResult}</p>
@@ -106,6 +134,9 @@
 		background: var(--panel); border: 2px solid #000; box-shadow: inset 2px 2px 0 var(--panel-hi), inset -2px -2px 0 var(--panel-lo);
 		padding: 8px 12px; margin: 14px 0 0; font-size: 0.92rem;
 	}
+	.banner.update { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; border-left: 6px solid var(--accent); }
+	.banner.update .acts { display: flex; gap: 12px; align-items: center; }
+	.banner.update a { color: var(--accent); }
 	.banner.warn { border-left: 6px solid var(--warn); }
 	.banner.err { border-left: 6px solid var(--bad); color: var(--bad); }
 	footer { color: #7d858d; font-size: 0.8rem; margin-top: 32px; }

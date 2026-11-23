@@ -201,3 +201,12 @@ export const unlockEncryption = (passphrase: string, remember: boolean) =>
 	call<Encryption>('POST', '/api/encryption/unlock', { passphrase, remember });
 export const lockEncryption = () => call<Encryption>('POST', '/api/encryption/lock');
 export const disableEncryption = () => call<Encryption>('POST', '/api/encryption/disable');
+
+export type UpdateInfo = {
+	available: boolean;
+	current: string;
+	latest?: string;
+	/** Release page to open to download the new version. */
+	url?: string;
+};
+export const getUpdate = () => call<UpdateInfo>('GET', '/api/update');
