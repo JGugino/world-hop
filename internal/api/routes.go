@@ -159,7 +159,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("POST /api/sources", func(w http.ResponseWriter, r *http.Request) {
 		if s.deps.Sources == nil {
-			writeErr(w, http.StatusNotImplemented, errors.New("sources are not configurable"))
+			writeErr(w, http.StatusNotImplemented, errors.New("saves are not configurable"))
 			return
 		}
 		var src worlds.Source
@@ -175,7 +175,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("POST /api/sources/remove", func(w http.ResponseWriter, r *http.Request) {
 		if s.deps.Sources == nil {
-			writeErr(w, http.StatusNotImplemented, errors.New("sources are not configurable"))
+			writeErr(w, http.StatusNotImplemented, errors.New("saves are not configurable"))
 			return
 		}
 		var src worlds.Source
