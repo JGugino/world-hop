@@ -11,10 +11,18 @@ default:
 # commit them. GOOGLE_CLIENT_SECRET, GUMROAD_PRODUCT_ID, PURCHASE_URL and
 # VERSION are optional (without a product ID the build cannot activate Pro).
 LINK_PKG = github.com/JGugino/world-hopper/internal/link
+<<<<<<< HEAD
+-include .env
+export
+=======
 LICENSE_PKG = github.com/JGugino/world-hopper/internal/license
 VERSION ?= dev
 OUT ?= worldhop
+>>>>>>> 7602bb8e5047dbfb16a8814ef4af8024dd3c9863
 release:
+	@echo "Building Web View UI..."
+	@cd ui/ && pnpm build
+	@echo "Building WorldHop executable..."
 	@test -n "$(GOOGLE_CLIENT_ID)" || { echo "set GOOGLE_CLIENT_ID"; exit 1; }
 	@go build -trimpath -ldflags "-s -w \
 	  -X main.version=$(VERSION) \
