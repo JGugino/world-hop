@@ -68,3 +68,50 @@ func TestEngineOverFakeDrive(t *testing.T) {
 		return s
 	}, fake.Names)
 }
+
+// A world uploaded to Drive by one computer shows up as cloud-only on another
+// with an empty saves folder, and downloads intact.
+func TestCloudOnlyDownloadOverFakeDrive(t *testing.T) {
+	httpx.BaseDelay = time.Millisecond
+	fake := storetest.NewFakeDrive()
+	defer fake.Close()
+	mk := func() *sync.Engine {
+		s := gdrive.New(&storetest.Auth{Fresh: "tok"}, fake.Client())
+		s.APIBase = fake.URL
+		e, err := sync.New(s, filepath.Join(t.TempDir(), "state"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	ctx := context.Background()
+	data := make([]byte, 2<<20)
+	rand.New(rand.NewSource(7)).Read(data)
+
+	ea, eb := mk(), mk()
+	wa := filepath.Join(t.TempDir(), "saves", "Creative")
+	os.MkdirAll(filepath.Join(wa, "region"), 0o755)
+	os.WriteFile(filepath.Join(wa, "level.dat"), []byte("level"), 0o644)
+	os.WriteFile(filepath.Join(wa, "region", "r.0.0.mca"), data, 0o644)
+	if _, err := ea.Push(ctx, worlds.World{ID: "Creative", Name: "Creative", Path: wa}); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := eb.RemoteIDs(ctx)
+	if err != nil || len(ids) != 1 || ids[0] != "Creative" {
+		t.Fatalf("RemoteIDs = %v %v", ids, err)
+	}
+	rw, err := eb.Remote(ctx, "Creative")
+	if err != nil || rw.Files != 2 || rw.Size != int64(len(data))+5 {
+		t.Fatalf("Remote = %+v %v", rw, err)
+	}
+	saves := filepath.Join(t.TempDir(), "saves")
+	os.MkdirAll(saves, 0o755)
+	if _, err := eb.Download(ctx, "Creative", saves); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(saves, "Creative", "region", "r.0.0.mca"))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("downloaded region differs: %v", err)
+	}
+}

@@ -32,6 +32,13 @@ type Runner struct {
 	// (without claiming the free slot). It only affects what the UI shows;
 	// the Engine's Authorize hook is what actually enforces the limit.
 	Limited func(worldID string) bool
+	// SavesFolders returns the configured saves-folder sources: the only
+	// places a cloud world may be downloaded into. Optional.
+	SavesFolders func() []string
+	// AutoDownload makes a full sync pass fetch cloud-only worlds this
+	// computer has never had, when there is exactly one saves folder to put
+	// them in. It only ever creates new folders.
+	AutoDownload bool
 
 	pass   stdsync.Mutex // one sync pass at a time
 	mu     stdsync.Mutex
@@ -67,7 +74,7 @@ func (r *Runner) ForceSync(ctx context.Context) RunnerStatus {
 		return r.Status()
 	}
 	defer r.pass.Unlock()
-	return r.runPass(ctx, r.listWorlds())
+	return r.runPass(ctx, r.listWorlds(), true)
 }
 
 // SyncWorlds syncs just the given worlds, waiting for any pass already in
@@ -75,14 +82,14 @@ func (r *Runner) ForceSync(ctx context.Context) RunnerStatus {
 func (r *Runner) SyncWorlds(ctx context.Context, ws []worlds.World) RunnerStatus {
 	r.pass.Lock()
 	defer r.pass.Unlock()
-	return r.runPass(ctx, ws)
+	return r.runPass(ctx, ws, false)
 }
 
 // SyncAll is ForceSync but waits for a running pass instead of skipping.
 func (r *Runner) SyncAll(ctx context.Context) RunnerStatus {
 	r.pass.Lock()
 	defer r.pass.Unlock()
-	return r.runPass(ctx, r.listWorlds())
+	return r.runPass(ctx, r.listWorlds(), true)
 }
 
 func (r *Runner) listWorlds() []worlds.World {
@@ -92,12 +99,14 @@ func (r *Runner) listWorlds() []worlds.World {
 	return r.list()
 }
 
-func (r *Runner) runPass(ctx context.Context, ws []worlds.World) RunnerStatus {
+// runPass runs one pass. full means a pass over everything (not a subset of
+// worlds that just closed), which is when cloud-only worlds are fetched.
+func (r *Runner) runPass(ctx context.Context, ws []worlds.World, full bool) RunnerStatus {
 	r.mu.Lock()
 	r.status.State = "syncing"
 	r.mu.Unlock()
 
-	result, warnings := r.run(ctx, ws)
+	result, warnings := r.run(ctx, ws, full)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -109,11 +118,11 @@ func (r *Runner) runPass(ctx context.Context, ws []worlds.World) RunnerStatus {
 	return r.status
 }
 
-func (r *Runner) run(ctx context.Context, ws []worlds.World) (string, []string) {
+func (r *Runner) run(ctx context.Context, ws []worlds.World, full bool) (string, []string) {
 	if r.engine == nil {
 		return "No sync store configured yet.", nil
 	}
-	if len(ws) == 0 {
+	if len(ws) == 0 && !(full && r.canAutoDownload()) {
 		return "No worlds found.", nil
 	}
 	var pushed, pulled, synced, open, conflicts, failed, limited int
@@ -161,7 +170,21 @@ func (r *Runner) run(ctx context.Context, ws []worlds.World) (string, []string) 
 			}
 		}
 	}
+	var downloaded int
+	if full && ctx.Err() == nil {
+		var dlErr error
+		downloaded, dlErr = r.autoDownload(ctx, ws)
+		if dlErr != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = dlErr
+			}
+		}
+	}
 	msg := fmt.Sprintf("Synced %d world(s): %d pushed, %d pulled, %d up to date", len(ws), pushed, pulled, synced)
+	if downloaded > 0 {
+		msg += fmt.Sprintf(", %d downloaded from the cloud", downloaded)
+	}
 	if open > 0 {
 		msg += fmt.Sprintf(", %d skipped (open in Minecraft)", open)
 	}
