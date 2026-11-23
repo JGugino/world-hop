@@ -38,8 +38,11 @@ type WorldInfo struct {
 // Worlds lists every world in the configured sources with its sync status.
 func (r *Runner) Worlds(ctx context.Context) []WorldInfo {
 	ws := r.listWorlds()
-	out := make([]WorldInfo, 0, len(ws))
-	for _, w := range ws {
+	out := make([]WorldInfo, len(ws))
+	// Each world's status reads its manifests and scans its files; do a few at
+	// a time so the world list opens quickly with several worlds.
+	parallel(ctx, len(ws), 4, func(ctx context.Context, i int) error {
+		w := ws[i]
 		info := WorldInfo{ID: w.ID, Name: w.Name, Path: w.Path, Launcher: w.Launcher, Status: "unknown"}
 		info.Locked = r.Limited != nil && r.Limited(w.ID)
 		if r.engine == nil {
@@ -54,8 +57,9 @@ func (r *Runner) Worlds(ctx context.Context) []WorldInfo {
 				info.Status = string(st)
 			}
 		}
-		out = append(out, info)
-	}
+		out[i] = info
+		return nil
+	})
 	return out
 }
 

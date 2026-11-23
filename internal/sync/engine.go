@@ -134,20 +134,43 @@ type head struct {
 }
 
 // heads returns manifests that no other manifest lists as a parent.
+//
+// Manifests are immutable and named by generation and device, so each one is
+// kept on this computer after its first download: a pass normally costs one
+// listing request, and only manifests written since the last pass are fetched
+// (concurrently).
 func (e *Engine) heads(ctx context.Context, id string) ([]head, error) {
 	names, err := e.Store.ListManifests(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	loaded := make([]*manifest.Manifest, len(names))
+	var missing []int
+	for i, n := range names {
+		if m := e.cachedManifest(id, n); m != nil {
+			loaded[i] = m
+		} else {
+			missing = append(missing, i)
+		}
+	}
+	err = parallel(ctx, len(missing), transferWorkers, func(ctx context.Context, k int) error {
+		i := missing[k]
+		m, err := e.loadManifest(ctx, id, names[i])
+		if err != nil {
+			return err
+		}
+		loaded[i] = m
+		e.cacheManifest(id, names[i], m)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	all := map[string]*manifest.Manifest{}
 	superseded := map[string]bool{}
-	for _, n := range names {
-		m, err := e.loadManifest(ctx, id, n)
-		if err != nil {
-			return nil, err
-		}
-		all[n] = m
-		for _, p := range m.Parents {
+	for i, n := range names {
+		all[n] = loaded[i]
+		for _, p := range loaded[i].Parents {
 			superseded[p] = true
 		}
 	}
@@ -169,6 +192,57 @@ func (e *Engine) heads(ctx context.Context, id string) ([]head, error) {
 		return hs[i].Name > hs[j].Name
 	})
 	return hs, nil
+}
+
+func (e *Engine) scoped(dir string) string {
+	if e.StateScope != nil {
+		if sc := e.StateScope(); sc != "" {
+			return filepath.Join(e.StateDir, dir, sc)
+		}
+	}
+	return filepath.Join(e.StateDir, dir)
+}
+
+func (e *Engine) manifestCachePath(id, name string) string {
+	return filepath.Join(e.scoped("manifests"), id, name)
+}
+
+// cachedManifest returns a manifest saved by an earlier pass, or nil.
+func (e *Engine) cachedManifest(id, name string) *manifest.Manifest {
+	b, err := os.ReadFile(e.manifestCachePath(id, name))
+	if err != nil {
+		return nil
+	}
+	m, err := manifest.Parse(b)
+	if err != nil || m.WorldID != id || m.Name() != name {
+		return nil
+	}
+	return m
+}
+
+func (e *Engine) cacheManifest(id, name string, m *manifest.Manifest) {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return
+	}
+	p := e.manifestCachePath(id, name)
+	if os.MkdirAll(filepath.Dir(p), 0o755) != nil {
+		return
+	}
+	tmp := p + ".tmp"
+	if os.WriteFile(tmp, b, 0o644) == nil && os.Rename(tmp, p) != nil {
+		os.Remove(tmp)
+	}
+}
+
+// dropManifestCache forgets the saved manifests of a world, for when the store
+// no longer matches what was saved (for example it was emptied and refilled).
+func (e *Engine) dropManifestCache(id string) {
+	os.RemoveAll(filepath.Join(e.scoped("manifests"), id))
+}
+
+func (e *Engine) statCache(id string) *statCache {
+	return loadStatCache(filepath.Join(e.scoped("cache"), id+".json"))
 }
 
 func (e *Engine) loadManifest(ctx context.Context, id, name string) (*manifest.Manifest, error) {
@@ -226,26 +300,62 @@ const (
 	StatusConflict    Status = "conflict"
 )
 
+// view is one look at a world: the stored heads and the local files. Every
+// operation takes exactly one, so a pass reads the store's manifests once and
+// the world's files once.
+type view struct {
+	hs     []head
+	exists bool
+	scan   *scanResult // nil when there is no local world
+	tree   string
+}
+
+// look gathers the heads and scans the local world at the same time (one is
+// network time, the other disk time).
+func (e *Engine) look(ctx context.Context, w worlds.World) (*view, error) {
+	v := &view{exists: worlds.IsWorld(w.Path)}
+	var scanErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if v.exists {
+			v.scan, scanErr = scan(w.Path, e.statCache(w.ID))
+		}
+	}()
+	hs, err := e.heads(ctx, w.ID)
+	<-done
+	if err != nil {
+		return nil, err
+	}
+	if scanErr != nil {
+		return nil, scanErr
+	}
+	v.hs = hs
+	if v.scan != nil {
+		v.tree = manifest.TreeHash(v.scan.Files)
+	}
+	return v, nil
+}
+
+func (e *Engine) status(w worlds.World, v *view) Status {
+	switch {
+	case len(v.hs) == 0 && !v.exists:
+		return StatusNoRemote
+	case len(v.hs) == 0:
+		return StatusLocalAhead
+	case !v.exists:
+		return StatusNoLocal
+	}
+	return e.classify(w.ID, v.hs, v.tree)
+}
+
 // Status compares the local world with the store without changing anything.
 func (e *Engine) Status(ctx context.Context, w worlds.World) (Status, error) {
-	hs, err := e.heads(ctx, w.ID)
+	v, err := e.look(ctx, w)
 	if err != nil {
 		return "", err
 	}
-	exists := worlds.IsWorld(w.Path)
-	switch {
-	case len(hs) == 0 && !exists:
-		return StatusNoRemote, nil
-	case len(hs) == 0:
-		return StatusLocalAhead, nil
-	case !exists:
-		return StatusNoLocal, nil
-	}
-	files, err := scanTree(w.Path, nil)
-	if err != nil {
-		return "", err
-	}
-	return e.classify(w.ID, hs, manifest.TreeHash(files)), nil
+	return e.status(w, v), nil
 }
 
 func (e *Engine) classify(id string, hs []head, local string) Status {
@@ -268,6 +378,46 @@ func (e *Engine) classify(id string, hs []head, local string) Status {
 	}
 }
 
+// ---- one sync step ----
+
+// SyncResult is what one Sync did.
+type SyncResult struct {
+	Status Status // the state found before acting
+	Pushed bool
+	Pulled bool
+}
+
+// Sync looks at the world once and does what its status calls for: push local
+// changes, pull a newer stored version, or nothing. It is what the tray and
+// scheduler run. It behaves like Status followed by Push or Pull, but reads
+// the store's manifests and the world's files once instead of up to three times.
+// Conflicts are reported in the result, not as an error.
+func (e *Engine) Sync(ctx context.Context, w worlds.World) (SyncResult, error) {
+	v, err := e.look(ctx, w)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	res := SyncResult{Status: e.status(w, v)}
+	switch res.Status {
+	case StatusLocalAhead, StatusNoRemote:
+		pr, err := e.pushWith(ctx, w, v)
+		res.Pushed = pr.Pushed
+		return res, err
+	case StatusRemoteAhead:
+		if err := e.check(w); err != nil {
+			return res, err
+		}
+		e.keepLeftover(w)
+		if err := Recover(w.Path); err != nil {
+			return res, err
+		}
+		_, err := e.apply(ctx, w, v.hs[0], "pull")
+		res.Pulled = err == nil
+		return res, err
+	}
+	return res, nil
+}
+
 // ---- push ----
 
 type PushResult struct {
@@ -284,29 +434,38 @@ func (e *Engine) Push(ctx context.Context, w worlds.World) (PushResult, error) {
 	if !worlds.IsWorld(w.Path) {
 		return PushResult{}, fmt.Errorf("%s is not a world folder", w.Path)
 	}
-	hs, err := e.heads(ctx, w.ID)
+	v, err := e.look(ctx, w)
 	if err != nil {
 		return PushResult{}, err
 	}
-	files, err := scanTree(w.Path, nil)
-	if err != nil {
+	return e.pushWith(ctx, w, v)
+}
+
+// pushWith is Push given a view already taken.
+func (e *Engine) pushWith(ctx context.Context, w worlds.World, v *view) (PushResult, error) {
+	if err := e.check(w); err != nil {
 		return PushResult{}, err
 	}
-	tree := manifest.TreeHash(files)
-	if len(hs) == 1 && hs[0].M.TreeHash() == tree { // already stored: just adopt
-		return PushResult{Manifest: hs[0].Name}, e.saveState(w.ID, state{hs[0].Name, tree})
+	if !v.exists {
+		return PushResult{}, fmt.Errorf("%s is not a world folder", w.Path)
 	}
-	switch e.classify(w.ID, hs, tree) {
+	hs := v.hs
+	if len(hs) == 1 && hs[0].M.TreeHash() == v.tree { // already stored: just adopt
+		return PushResult{Manifest: hs[0].Name}, e.saveState(w.ID, state{hs[0].Name, v.tree})
+	}
+	switch e.classify(w.ID, hs, v.tree) {
 	case StatusRemoteAhead:
 		return PushResult{}, ErrBehind
 	case StatusConflict:
 		return PushResult{}, &ConflictError{w.ID, headNames(hs)}
 	}
-	return e.upload(ctx, w, hs)
+	return e.upload(ctx, w, hs, v.scan)
 }
 
-// upload writes packs, then a manifest whose parents are hs.
-func (e *Engine) upload(ctx context.Context, w worlds.World, hs []head) (PushResult, error) {
+// upload writes packs, then a manifest whose parents are hs. sc is a scan of
+// the world taken just before; only files holding chunks the store does not
+// already have are read again.
+func (e *Engine) upload(ctx context.Context, w worlds.World, hs []head, sc *scanResult) (PushResult, error) {
 	known := map[string]manifest.ChunkLoc{}
 	var gen int64
 	var parents []string
@@ -328,14 +487,13 @@ func (e *Engine) upload(ctx context.Context, w worlds.World, hs []head) (PushRes
 		inPack   = map[string]bool{}
 		newBytes int64
 	)
+	up := newPackUploader(ctx, e.Store, transferWorkers)
+	defer func() { up.cancel(); up.wg.Wait() }() // no upload outlives the call
 	flush := func() error {
 		if len(buf) == 0 {
 			return nil
 		}
 		pack := chunker.Hash(buf)
-		if err := e.Store.PutPack(ctx, pack, buf); err != nil {
-			return err
-		}
 		for i, h := range pending {
 			end := int64(len(buf))
 			if i+1 < len(pending) {
@@ -344,10 +502,11 @@ func (e *Engine) upload(ctx context.Context, w worlds.World, hs []head) (PushRes
 			chunks[h] = manifest.ChunkLoc{Pack: pack, Offset: offsets[i], Length: end - offsets[i]}
 		}
 		newBytes += int64(len(buf))
+		data := buf
 		buf, pending, offsets, inPack = nil, nil, nil, map[string]bool{}
-		return nil
+		return up.put(pack, data) // runs in the background; wait() below reports failures
 	}
-	files, err := scanTree(w.Path, func(h string, data []byte) error {
+	onChunk := func(h string, data []byte) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -366,11 +525,32 @@ func (e *Engine) upload(ctx context.Context, w worlds.World, hs []head) (PushRes
 			return flush()
 		}
 		return nil
-	})
-	if err != nil {
-		return PushResult{}, err
+	}
+	files := append([]manifest.File(nil), sc.Files...)
+	for i, f := range files {
+		need := false
+		for _, h := range f.Chunks {
+			if loc, ok := known[h]; ok {
+				chunks[h] = loc
+			} else if _, ok := chunks[h]; !ok {
+				need = true
+			}
+		}
+		if !need {
+			continue
+		}
+		lf, err := feedChunks(filepath.Join(w.Path, filepath.FromSlash(f.Path)), onChunk)
+		if err != nil {
+			return PushResult{}, err
+		}
+		// What was uploaded is what the manifest describes, even if the game
+		// touched the file since the scan.
+		files[i] = manifest.File{Path: f.Path, Size: lf.Size, Mode: lf.Mode, MTime: lf.MTime, Chunks: lf.Chunks}
 	}
 	if err := flush(); err != nil {
+		return PushResult{}, err
+	}
+	if err := up.wait(); err != nil {
 		return PushResult{}, err
 	}
 	m := &manifest.Manifest{
@@ -389,6 +569,7 @@ func (e *Engine) upload(ctx context.Context, w worlds.World, hs []head) (PushRes
 	if err := e.Store.PutManifest(ctx, w.ID, m.Name(), data); err != nil {
 		return PushResult{}, err
 	}
+	e.cacheManifest(w.ID, m.Name(), m)
 	if err := e.saveState(w.ID, state{m.Name(), m.TreeHash()}); err != nil {
 		return PushResult{}, err
 	}
@@ -409,27 +590,24 @@ func (e *Engine) Pull(ctx context.Context, w worlds.World) (PullResult, error) {
 	if err := e.check(w); err != nil {
 		return PullResult{}, err
 	}
+	e.keepLeftover(w)
 	if err := Recover(w.Path); err != nil {
 		return PullResult{}, err
 	}
-	hs, err := e.heads(ctx, w.ID)
+	v, err := e.look(ctx, w)
 	if err != nil {
 		return PullResult{}, err
 	}
+	hs := v.hs
 	if len(hs) == 0 {
 		return PullResult{}, nil
 	}
-	if !worlds.IsWorld(w.Path) {
+	if !v.exists {
 		return e.apply(ctx, w, hs[0], "pull")
 	}
-	files, err := scanTree(w.Path, nil)
-	if err != nil {
-		return PullResult{}, err
-	}
-	tree := manifest.TreeHash(files)
-	switch e.classify(w.ID, hs, tree) {
+	switch e.classify(w.ID, hs, v.tree) {
 	case StatusSynced:
-		return PullResult{Manifest: hs[0].Name}, e.saveState(w.ID, state{hs[0].Name, tree})
+		return PullResult{Manifest: hs[0].Name}, e.saveState(w.ID, state{hs[0].Name, v.tree})
 	case StatusLocalAhead:
 		return PullResult{}, nil
 	case StatusRemoteAhead:
@@ -438,8 +616,9 @@ func (e *Engine) Pull(ctx context.Context, w worlds.World) (PullResult, error) {
 	return PullResult{}, &ConflictError{w.ID, headNames(hs)}
 }
 
-// apply downloads h, builds it in a staging dir, verifies every hash,
-// snapshots the current world and swaps it in atomically.
+// apply builds h in a staging dir (reusing local data, downloading the rest),
+// verifies every hash, then swaps it in atomically, keeping the replaced world
+// as a snapshot.
 func (e *Engine) apply(ctx context.Context, w worlds.World, h head, reason string) (PullResult, error) {
 	staging := stagingPath(w.Path)
 	if err := os.RemoveAll(staging); err != nil {
@@ -448,82 +627,38 @@ func (e *Engine) apply(ctx context.Context, w worlds.World, h head, reason strin
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return PullResult{}, err
 	}
-	if err := e.materialize(ctx, h.M, staging); err != nil {
-		os.RemoveAll(staging)
-		return PullResult{}, err
+	exists := worlds.IsWorld(w.Path)
+	var local *scanResult
+	if exists {
+		local, _ = scan(w.Path, e.statCache(w.ID)) // only used to avoid downloads
 	}
-	// Verify the result before touching the real world.
-	files, err := scanTree(staging, nil)
-	if err == nil && manifest.TreeHash(files) != h.M.TreeHash() {
-		err = fmt.Errorf("%w: rebuilt world differs from manifest", ErrIntegrity)
+	err := e.materialize(ctx, h.M, staging, w.Path, local)
+	if err != nil && errors.Is(err, store.ErrNotFound) {
+		// A saved manifest may describe packs the store no longer has (it was
+		// emptied and refilled). Forget the saved ones and look again.
+		os.RemoveAll(staging)
+		os.MkdirAll(staging, 0o755)
+		e.dropManifestCache(w.ID)
+		err = e.materialize(ctx, h.M, staging, w.Path, local)
 	}
 	if err != nil {
 		os.RemoveAll(staging)
 		return PullResult{}, err
 	}
+	fresh := cacheFromManifest(h.M, staging)
 	res := PullResult{Manifest: h.Name, Updated: true}
-	if worlds.IsWorld(w.Path) {
-		if res.Snapshot, err = e.Snapshot(w, reason); err != nil {
-			os.RemoveAll(staging)
-			return PullResult{}, fmt.Errorf("snapshot before overwrite: %w", err)
+	if exists {
+		if res.Snapshot, err = e.swapWithSnapshot(w, staging, reason); err != nil {
+			return PullResult{}, err
 		}
-	}
-	if err := swapIn(w.Path, staging); err != nil {
+	} else if err := swapIn(w.Path, staging); err != nil {
 		os.RemoveAll(staging)
 		return PullResult{}, err
 	}
+	sc := e.statCache(w.ID)
+	sc.entries, sc.dirty = fresh, true
+	sc.save()
 	return res, e.saveState(w.ID, state{h.Name, h.M.TreeHash()})
-}
-
-// materialize writes manifest m's files into dir, verifying chunk hashes.
-func (e *Engine) materialize(ctx context.Context, m *manifest.Manifest, dir string) error {
-	var packName string
-	var pack []byte
-	for _, f := range m.Files {
-		target := filepath.Join(dir, filepath.FromSlash(f.Path))
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, os.FileMode(f.Mode&0o777)|0o600)
-		if err != nil {
-			return err
-		}
-		for _, h := range f.Chunks {
-			loc := m.Chunks[h]
-			if loc.Pack != packName {
-				b, err := e.Store.GetPack(ctx, loc.Pack)
-				if err == nil && chunker.Hash(b) != loc.Pack {
-					err = fmt.Errorf("%w: pack %s", ErrIntegrity, loc.Pack)
-				}
-				if err != nil {
-					out.Close()
-					return err
-				}
-				packName, pack = loc.Pack, b
-			}
-			if loc.Offset+loc.Length > int64(len(pack)) {
-				out.Close()
-				return fmt.Errorf("%w: chunk outside pack", ErrIntegrity)
-			}
-			data := pack[loc.Offset : loc.Offset+loc.Length]
-			if chunker.Hash(data) != h {
-				out.Close()
-				return fmt.Errorf("%w: chunk %s", ErrIntegrity, h)
-			}
-			if _, err := out.Write(data); err != nil {
-				out.Close()
-				return err
-			}
-		}
-		if err := out.Close(); err != nil {
-			return err
-		}
-		if f.MTime > 0 {
-			t := time.Unix(0, f.MTime)
-			os.Chtimes(target, t, t)
-		}
-	}
-	return nil
 }
 
 // ---- conflict resolution ----
@@ -559,12 +694,15 @@ func (e *Engine) Resolve(ctx context.Context, w worlds.World, s Strategy) (Resol
 		s = KeepRemote
 	}
 	res := ResolveResult{Used: s}
-	if s == KeepNewest {
-		files, err := scanTree(w.Path, nil)
-		if err != nil {
+	var sc *scanResult
+	if worlds.IsWorld(w.Path) && (s == KeepNewest || s == KeepLocal) {
+		var err error
+		if sc, err = scan(w.Path, e.statCache(w.ID)); err != nil {
 			return res, err
 		}
-		if newestMTime(files) > hs[0].M.CreatedAt.UnixNano() {
+	}
+	if s == KeepNewest {
+		if newestMTime(sc.Files) > hs[0].M.CreatedAt.UnixNano() {
 			s = KeepLocal
 		} else {
 			s = KeepRemote
@@ -573,7 +711,7 @@ func (e *Engine) Resolve(ctx context.Context, w worlds.World, s Strategy) (Resol
 	}
 	switch s {
 	case KeepLocal:
-		r, err := e.upload(ctx, w, hs) // parents = all heads, so it supersedes them
+		r, err := e.upload(ctx, w, hs, sc) // parents = all heads, so it supersedes them
 		res.Manifest = r.Manifest
 		return res, err
 	case KeepBoth:

@@ -33,15 +33,84 @@ func (e *Engine) Snapshot(w worlds.World, reason string) (string, error) {
 	if err := os.Rename(tmp, dst); err != nil {
 		return "", err
 	}
+	e.pruneSnapshots(w.ID)
+	return id, nil
+}
+
+func (e *Engine) pruneSnapshots(worldID string) {
 	keep := e.SnapshotsKeep
 	if keep <= 0 {
 		keep = 5
 	}
-	if all, err := e.Snapshots(w.ID); err == nil && len(all) > keep {
+	if all, err := e.Snapshots(worldID); err == nil && len(all) > keep {
 		for _, s := range all[:len(all)-keep] {
 			os.RemoveAll(s.Path)
 		}
 	}
+}
+
+// canMoveSnapshot reports whether a world folder can be renamed into the
+// snapshot area (same volume), by trying it with an empty folder.
+func (e *Engine) canMoveSnapshot(w worlds.World) bool {
+	src := filepath.Join(filepath.Dir(w.Path), ".worldhopper-probe-"+filepath.Base(w.Path))
+	dst := filepath.Join(e.snapDir(w.ID), ".probe.partial")
+	os.RemoveAll(src)
+	os.RemoveAll(dst)
+	if os.MkdirAll(src, 0o755) != nil || os.MkdirAll(filepath.Dir(dst), 0o755) != nil {
+		os.RemoveAll(src)
+		return false
+	}
+	err := os.Rename(src, dst)
+	os.RemoveAll(src)
+	os.RemoveAll(dst)
+	return err == nil
+}
+
+// keepLeftover files a world left at its aside path as a snapshot. That
+// happens when the app stopped between swapping a new version in and filing
+// the replaced one as a snapshot. Recover would delete it, so it is kept first.
+func (e *Engine) keepLeftover(w worlds.World) {
+	old := oldPath(w.Path)
+	if _, err := os.Stat(old); err != nil || !worlds.IsWorld(w.Path) {
+		return // nothing left over, or the world is missing and Recover puts it back
+	}
+	if os.MkdirAll(e.snapDir(w.ID), 0o755) != nil {
+		return
+	}
+	id := e.now().Format("20060102T150405.000000Z") + "-recovered"
+	if rename(old, filepath.Join(e.snapDir(w.ID), id)) == nil {
+		e.pruneSnapshots(w.ID)
+	}
+}
+
+// swapWithSnapshot replaces the world at w.Path with staging and keeps the
+// replaced world as a snapshot, returning its id. When the snapshot area is on
+// the same volume the old folder is simply renamed into it, so no data is
+// copied: the old world exists under one name or the other at every instant.
+// Otherwise it is copied first, as Snapshot does, before anything is replaced.
+func (e *Engine) swapWithSnapshot(w worlds.World, staging, reason string) (string, error) {
+	if !e.canMoveSnapshot(w) {
+		id, err := e.Snapshot(w, reason)
+		if err != nil {
+			os.RemoveAll(staging)
+			return "", fmt.Errorf("snapshot before overwrite: %w", err)
+		}
+		if err := swapIn(w.Path, staging); err != nil {
+			os.RemoveAll(staging)
+			return "", err
+		}
+		return id, nil
+	}
+	if _, err := swapKeepOld(w.Path, staging); err != nil {
+		os.RemoveAll(staging)
+		return "", err
+	}
+	id := e.now().Format("20060102T150405.000000Z") + "-" + reason
+	if err := rename(oldPath(w.Path), filepath.Join(e.snapDir(w.ID), id)); err != nil {
+		// The world is already replaced; the old one stays at its aside path.
+		return "", fmt.Errorf("the world was updated but the previous version could not be saved as a snapshot (it is still at %s): %w", oldPath(w.Path), err)
+	}
+	e.pruneSnapshots(w.ID)
 	return id, nil
 }
 
