@@ -29,6 +29,14 @@ RELEASE_LDFLAGS = -s -w \
   -X $(LICENSE_PKG).GumroadProductID=$(GUMROAD_PRODUCT_ID) \
   -X $(LICENSE_PKG).PurchaseURL=$(PURCHASE_URL)
 
+# Development run with cloud sign-in: builds the UI and a binary with the IDs
+# from .env compiled in (same as a release), then runs it with the normal
+# cloud store. Plain `make` uses -store, a shared folder, which turns cloud
+# accounts off.
+dev: ui
+	@go build -ldflags "$(RELEASE_LDFLAGS)" -o $(DIST)/worldhop ./cmd/worldhop
+	@$(DIST)/worldhop
+
 UNAME_S := $(shell uname -s)
 
 # Build the web UI (shared by every release target; make runs it once).
@@ -107,4 +115,4 @@ package-linux: release
 package-macos: release
 	@VERSION=$(VERSION) BIN=$(OUT) sh packaging/macos.sh
 
-.PHONY: syso icons default ui check-release-env release release-linux release-windows release-mac release-all package-linux package-macos
+.PHONY: syso icons default dev ui check-release-env release release-linux release-windows release-mac release-all package-linux package-macos

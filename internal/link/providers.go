@@ -17,6 +17,9 @@ func (a API) List(context.Context) []api.Provider {
 	var out []api.Provider
 	for _, p := range st.Providers {
 		ap := api.Provider{ID: p.ID, Name: p.Name, Available: p.Configured, Linked: p.Linked, Pro: p.Pro, Locked: p.Locked}
+		if !p.Configured {
+			ap.Note = "Google sign-in isn't set up in this build (no OAuth client ID was compiled in). Release builds include it; for a development build, put GOOGLE_CLIENT_ID in .env and run `make dev`."
+		}
 		if p.ID == st.Chosen {
 			switch st.State {
 			case StateLinking:
