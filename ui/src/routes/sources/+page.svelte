@@ -67,7 +67,7 @@
 		create later. A <b>single world</b> syncs just that one folder.
 	</p>
 	<form onsubmit={add}>
-		<div class="kinds" role="radiogroup" aria-label="Source type">
+		<div class="kinds" role="radiogroup" aria-label="Save type">
 			<label class="kind" class:on={kind === 'saves'}>
 				<input type="radio" bind:group={kind} value="saves" />
 				<span class="kind-text"><b>Saves folder</b><small>Every world inside</small></span>
@@ -135,7 +135,7 @@
 				</li>
 			{/each}
 		</ul>
-		<p class="muted small foot">Removing a source stops syncing it. Your files and cloud copies are not deleted.</p>
+		<p class="muted small foot">Removing a save stops syncing it. Your files and cloud copies are not deleted.</p>
 	{/if}
 </section>
 
