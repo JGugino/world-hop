@@ -1,8 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getProviders, linkProvider, unlinkProvider, type Provider } from '$lib/api';
+	import {
+		getProviders,
+		linkProvider,
+		unlinkProvider,
+		getS3,
+		saveS3,
+		testS3,
+		type Provider,
+		type S3Input
+	} from '$lib/api';
 
-	let p = $state<Provider | null>(null);
+	let providers = $state<Provider[]>([]);
 	let loaded = $state(false);
 	let error = $state('');
 	let busy = $state<string | null>(null);
@@ -10,8 +19,7 @@
 
 	async function load() {
 		try {
-			// One provider today (Google Drive); the API stays a list so more can be added.
-			p = (await getProviders())[0] ?? null;
+			providers = await getProviders();
 			loaded = true;
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -44,6 +52,56 @@
 		await load();
 	}
 
+	// --- S3-compatible storage (Pro) ---
+	let editingS3 = $state(false);
+	let s3 = $state<S3Input>({
+		endpoint: '', region: '', bucket: '', prefix: '', pathStyle: false, accessKey: '', secretKey: ''
+	});
+	let s3HasSecret = $state(false);
+	let s3Result = $state<{ ok: boolean; text: string } | null>(null);
+	let s3Busy = $state(false);
+
+	async function editS3() {
+		error = '';
+		s3Result = null;
+		try {
+			const { hasSecret, ...c } = await getS3();
+			s3 = { ...c, secretKey: '' };
+			s3HasSecret = hasSecret;
+			editingS3 = true;
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function runTestS3() {
+		s3Busy = true;
+		s3Result = null;
+		try {
+			const r = await testS3(s3);
+			s3Result = r.ok
+				? { ok: true, text: 'Connected. This key can reach the bucket.' }
+				: { ok: false, text: r.error ?? 'Could not connect.' };
+		} catch (e) {
+			s3Result = { ok: false, text: e instanceof Error ? e.message : String(e) };
+		}
+		s3Busy = false;
+	}
+
+	async function doSaveS3() {
+		s3Busy = true;
+		error = '';
+		try {
+			await saveS3(s3);
+			s3.secretKey = '';
+			editingS3 = false;
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		}
+		s3Busy = false;
+		await load();
+	}
+
 	onMount(() => {
 		load();
 		// Poll so the card flips to "Connected" once the browser step finishes.
@@ -59,45 +117,131 @@
 
 {#if !loaded}
 	<p class="muted">Loading…</p>
-{:else if p}
-	{@const prov = p}
-	<section class="card">
-		<div class="head">
-			<div>
-				<h2>{prov.name}</h2>
-				{#if prov.linked}
-					<p class="ok small">Connected{prov.account ? ` as ${prov.account}` : ''}</p>
-				{:else if prov.pending}
-					<p class="muted small">Waiting for you to approve access in your browser…</p>
-				{:else if !prov.available}
-					<p class="muted small">Coming soon.</p>
+{:else if providers.length}
+	{#each providers as prov (prov.id)}
+		<section class="card">
+			<div class="head">
+				<div>
+					<h2>
+						{prov.name}
+						{#if prov.pro}<span class="badge">Pro</span>{/if}
+					</h2>
+					{#if prov.locked}
+						<p class="muted small">
+							Store worlds in your own S3, Cloudflare R2, Backblaze B2 or MinIO bucket. Needs a
+							WorldHop Pro licence.
+						</p>
+					{:else if prov.linked}
+						<p class="ok small">Connected{prov.account ? ` as ${prov.account}` : ''}</p>
+					{:else if prov.pending}
+						<p class="muted small">Waiting for you to approve access in your browser…</p>
+					{:else if !prov.available}
+						<p class="muted small">Coming soon.</p>
+					{:else}
+						<p class="muted small">Not connected.</p>
+					{/if}
+					{#if prov.error}<p class="bad small">{prov.error}</p>{/if}
+				</div>
+				{#if prov.locked}
+					<!-- nothing to do until a licence is present -->
+				{:else if prov.linked}
+					{#if confirmUnlink === prov.id}
+						<span class="row">
+							<button class="danger" disabled={busy === prov.id} onclick={() => disconnect(prov)}>Disconnect</button>
+							<button class="secondary" onclick={() => (confirmUnlink = null)}>Cancel</button>
+						</span>
+					{:else}
+						<span class="row">
+							{#if prov.id === 's3' && !editingS3}
+								<button class="secondary" onclick={editS3}>Edit</button>
+							{/if}
+							<button class="secondary" onclick={() => (confirmUnlink = prov.id)}>Disconnect</button>
+						</span>
+					{/if}
+				{:else if prov.id === 's3'}
+					{#if !editingS3}
+						<button disabled={!prov.available} onclick={editS3}>Set up</button>
+					{/if}
 				{:else}
-					<p class="muted small">Not connected.</p>
+					<button disabled={!prov.available || prov.pending || busy === prov.id} onclick={() => connect(prov)}>
+						{prov.error ? 'Reconnect' : 'Connect'}
+					</button>
 				{/if}
-				{#if prov.error}<p class="bad small">{prov.error}</p>{/if}
 			</div>
-			{#if prov.linked}
-				{#if confirmUnlink === prov.id}
-					<span class="row">
-						<button class="danger" disabled={busy === prov.id} onclick={() => disconnect(prov)}>Disconnect</button>
-						<button class="secondary" onclick={() => (confirmUnlink = null)}>Cancel</button>
-					</span>
-				{:else}
-					<button class="secondary" onclick={() => (confirmUnlink = prov.id)}>Disconnect</button>
-				{/if}
-			{:else}
-				<button disabled={!prov.available || prov.pending || busy === prov.id} onclick={() => connect(prov)}>
-					{prov.error ? 'Reconnect' : 'Connect'}
-				</button>
+			{#if confirmUnlink === prov.id}
+				<p class="muted small">
+					{#if prov.id === 's3'}
+						This removes the saved settings and the secret key from this computer. Worlds already
+						in the bucket stay where they are.
+					{:else}
+						This forgets the saved sign-in on this computer. Worlds already in your cloud account
+						stay where they are.
+					{/if}
+				</p>
 			{/if}
-		</div>
-		{#if confirmUnlink === prov.id}
-			<p class="muted small">
-				This forgets the saved sign-in on this computer. Worlds already in your cloud account stay
-				where they are.
-			</p>
-		{/if}
-	</section>
+
+			{#if prov.id === 's3' && editingS3 && !prov.locked}
+				<form
+					class="s3form"
+					onsubmit={(e) => {
+						e.preventDefault();
+						doSaveS3();
+					}}
+				>
+					<label>
+						Endpoint
+						<input type="text" bind:value={s3.endpoint} placeholder="Leave empty for AWS S3" autocomplete="off" />
+						<span class="hint">e.g. https://&lt;account&gt;.r2.cloudflarestorage.com or http://localhost:9000</span>
+					</label>
+					<div class="two">
+						<label>
+							Bucket
+							<input type="text" bind:value={s3.bucket} required autocomplete="off" />
+						</label>
+						<label>
+							Region
+							<input type="text" bind:value={s3.region} placeholder="us-east-1" autocomplete="off" />
+						</label>
+					</div>
+					<label>
+						Folder in the bucket (optional)
+						<input type="text" bind:value={s3.prefix} placeholder="worldhop" autocomplete="off" />
+					</label>
+					<label class="check">
+						<input type="checkbox" bind:checked={s3.pathStyle} />
+						Use path-style addresses (needed by MinIO and most self-hosted servers)
+					</label>
+					<div class="two">
+						<label>
+							Access key
+							<input type="text" bind:value={s3.accessKey} required autocomplete="off" />
+						</label>
+						<label>
+							Secret key
+							<input
+								type="password"
+								bind:value={s3.secretKey}
+								placeholder={s3HasSecret ? 'Saved. Leave empty to keep it.' : ''}
+								required={!s3HasSecret}
+								autocomplete="new-password"
+							/>
+						</label>
+					</div>
+					<p class="muted small">The secret key is kept in your system keychain, not in a file.</p>
+					{#if s3Result}
+						<p class={s3Result.ok ? 'ok small' : 'bad small'} role="status">{s3Result.text}</p>
+					{/if}
+					<div class="row">
+						<button type="button" class="secondary" disabled={s3Busy} onclick={runTestS3}>
+							{s3Busy ? 'Working…' : 'Test connection'}
+						</button>
+						<button type="submit" disabled={s3Busy}>Save</button>
+						<button type="button" class="secondary" onclick={() => (editingS3 = false)}>Cancel</button>
+					</div>
+				</form>
+			{/if}
+		</section>
+	{/each}
 {:else}
 	<p class="muted">No cloud storage is available in this build.</p>
 {/if}
@@ -109,4 +253,12 @@
 	.ok { color: var(--ok); margin: 0; }
 	.bad { color: var(--bad); }
 	p.small { margin: 0; }
+	.badge { font-size: 0.65em; font-weight: 600; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); vertical-align: middle; margin-left: 4px; }
+	.s3form { display: grid; gap: 12px; margin-top: 16px; }
+	.s3form label { display: grid; gap: 4px; font-size: 0.9em; }
+	.s3form label.check { display: flex; gap: 8px; align-items: center; }
+	.s3form input[type='text'], .s3form input[type='password'] { width: 100%; box-sizing: border-box; }
+	.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+	.hint { color: var(--muted, inherit); font-size: 0.85em; opacity: 0.8; }
+	@media (max-width: 560px) { .two { grid-template-columns: 1fr; } }
 </style>

@@ -30,6 +30,9 @@ type Deps struct {
 	Sources   SourceStore
 	Providers Providers
 	License   Licenser
+	// ObjectStorage is the optional S3-compatible setup (Pro). Nil means this
+	// build or mode has none.
+	ObjectStorage ObjectStorage
 }
 
 // Licenser is the license state the UI shows and edits. *license.Manager
@@ -289,6 +292,55 @@ func (s *Server) routes(mux *http.ServeMux) {
 		}
 		writeJSON(w, start)
 	})
+	mux.HandleFunc("GET /api/s3", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.ObjectStorage == nil {
+			writeErr(w, http.StatusNotImplemented, ErrProviderUnavailable)
+			return
+		}
+		writeJSON(w, s.deps.ObjectStorage.S3Config())
+	})
+	mux.HandleFunc("PUT /api/s3", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.ObjectStorage == nil {
+			writeErr(w, http.StatusNotImplemented, ErrProviderUnavailable)
+			return
+		}
+		var in S3Input
+		if !readJSON(w, r, &in) {
+			return
+		}
+		if err := s.deps.ObjectStorage.Save(in); err != nil {
+			if errors.Is(err, license.ErrProRequired) {
+				writeServiceErr(w, err)
+			} else {
+				writeErr(w, http.StatusBadRequest, err)
+			}
+			return
+		}
+		writeJSON(w, s.deps.ObjectStorage.S3Config())
+	})
+	// Test always answers 200 with {ok, error} so the form can show the reason;
+	// only a missing licence is an HTTP error.
+	mux.HandleFunc("POST /api/s3/test", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.ObjectStorage == nil {
+			writeErr(w, http.StatusNotImplemented, ErrProviderUnavailable)
+			return
+		}
+		var in S3Input
+		if !readJSON(w, r, &in) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		err := s.deps.ObjectStorage.Test(ctx, in)
+		switch {
+		case err == nil:
+			writeJSON(w, map[string]any{"ok": true})
+		case errors.Is(err, license.ErrProRequired):
+			writeServiceErr(w, err)
+		default:
+			writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+		}
+	})
 	mux.HandleFunc("POST /api/providers/{id}/unlink", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.providers().Unlink(r.Context(), r.PathValue("id")); err != nil {
 			writeServiceErr(w, err)
@@ -305,6 +357,8 @@ func writeServiceErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusNotFound, err)
 	case errors.Is(err, sync.ErrBadStrategy), errors.Is(err, sync.ErrBadTarget):
 		writeErr(w, http.StatusBadRequest, err)
+	case errors.Is(err, license.ErrProRequired):
+		writeErr(w, http.StatusPaymentRequired, err)
 	case errors.Is(err, license.ErrWorldLimit):
 		writeErr(w, http.StatusForbidden, err)
 	case errors.Is(err, license.ErrUnavailable):

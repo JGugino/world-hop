@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -187,3 +188,70 @@ func TestCloudWorldsAPI(t *testing.T) {
 }
 
 func jsonStr(s string) string { b, _ := json.Marshal(s); return string(b) }
+
+type fakeS3 struct {
+	saved   S3Input
+	proErr  error
+	testErr error
+}
+
+func (f *fakeS3) S3Config() S3Config {
+	return S3Config{Bucket: f.saved.Bucket, AccessKey: f.saved.AccessKey, HasSecret: f.saved.SecretKey != ""}
+}
+func (f *fakeS3) Save(in S3Input) error {
+	if f.proErr != nil {
+		return f.proErr
+	}
+	if in.Bucket == "" {
+		return errors.New("bucket is required")
+	}
+	f.saved = in
+	return nil
+}
+func (f *fakeS3) Test(_ context.Context, in S3Input) error {
+	if f.proErr != nil {
+		return f.proErr
+	}
+	return f.testErr
+}
+
+func TestS3Routes(t *testing.T) {
+	f := &fakeS3{}
+	h := (&Server{deps: Deps{ObjectStorage: f}, assets: fstest.MapFS{}}).Handler()
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Host = "127.0.0.1:1"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := do("PUT", "/api/s3", `{"bucket":"b","accessKey":"AK","secretKey":"SECRET"}`); w.Code != 200 ||
+		strings.Contains(w.Body.String(), "SECRET") || !strings.Contains(w.Body.String(), `"hasSecret":true`) {
+		t.Fatalf("save: %d %s", w.Code, w.Body)
+	}
+	if w := do("GET", "/api/s3", ""); strings.Contains(w.Body.String(), "SECRET") {
+		t.Fatalf("secret leaked: %s", w.Body)
+	}
+	if w := do("PUT", "/api/s3", `{}`); w.Code != 400 {
+		t.Fatalf("invalid save: %d", w.Code)
+	}
+	if w := do("POST", "/api/s3/test", `{"bucket":"b"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"ok":true`) {
+		t.Fatalf("test ok: %d %s", w.Code, w.Body)
+	}
+	f.testErr = errors.New("s3: AccessDenied")
+	if w := do("POST", "/api/s3/test", `{"bucket":"b"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"ok":false`) ||
+		!strings.Contains(w.Body.String(), "AccessDenied") {
+		t.Fatalf("test fail: %d %s", w.Code, w.Body)
+	}
+	f.proErr = license.ErrProRequired
+	for _, c := range [][2]string{{"PUT", "/api/s3"}, {"POST", "/api/s3/test"}} {
+		if w := do(c[0], c[1], `{"bucket":"b"}`); w.Code != http.StatusPaymentRequired {
+			t.Fatalf("%v without Pro: %d", c, w.Code)
+		}
+	}
+	// No ObjectStorage wired in.
+	h = (&Server{assets: fstest.MapFS{}}).Handler()
+	if w := do("GET", "/api/s3", ""); w.Code != http.StatusNotImplemented {
+		t.Fatalf("unwired: %d", w.Code)
+	}
+}

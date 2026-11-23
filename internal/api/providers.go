@@ -16,6 +16,10 @@ type Provider struct {
 	Pending   bool   `json:"pending"`           // consent page opened, waiting for the user
 	Account   string `json:"account,omitempty"` // e.g. the account's email
 	Error     string `json:"error,omitempty"`   // e.g. "access revoked, reconnect"
+	// Pro marks a provider that needs a Pro licence; Locked means this
+	// computer has none, so the UI shows it as an upgrade rather than a form.
+	Pro    bool `json:"pro,omitempty"`
+	Locked bool `json:"locked,omitempty"`
 }
 
 // LinkStart is returned when linking begins.
@@ -62,4 +66,39 @@ func stubErr(id string) error {
 		return ErrProviderUnavailable
 	}
 	return ErrUnknownProvider
+}
+
+// S3Config is the saved S3-compatible storage setup as the UI sees it. The
+// secret key is never returned, only whether one is stored.
+type S3Config struct {
+	Endpoint  string `json:"endpoint"`
+	Region    string `json:"region"`
+	Bucket    string `json:"bucket"`
+	Prefix    string `json:"prefix"`
+	PathStyle bool   `json:"pathStyle"`
+	AccessKey string `json:"accessKey"`
+	HasSecret bool   `json:"hasSecret"`
+}
+
+// S3Input is what the settings form submits. An empty SecretKey keeps the
+// stored one.
+type S3Input struct {
+	Endpoint  string `json:"endpoint"`
+	Region    string `json:"region"`
+	Bucket    string `json:"bucket"`
+	Prefix    string `json:"prefix"`
+	PathStyle bool   `json:"pathStyle"`
+	AccessKey string `json:"accessKey"`
+	SecretKey string `json:"secretKey"`
+}
+
+// ObjectStorage is the setup form behind the S3-compatible provider (Pro).
+// Save and Test return license.ErrProRequired without a Pro licence.
+type ObjectStorage interface {
+	S3Config() S3Config
+	// Save stores the settings (secret in the keychain) and selects S3.
+	Save(in S3Input) error
+	// Test tries the bucket with the given settings, saving nothing. A nil
+	// error means the credentials can list the bucket.
+	Test(ctx context.Context, in S3Input) error
 }

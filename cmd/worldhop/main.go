@@ -80,6 +80,10 @@ func main() {
 		log.Fatal(err)
 	}
 	engine.Authorize = lic.Authorize
+	if cloud != nil {
+		// S3-compatible storage is a Pro feature; its secret key lives in the keychain.
+		cloud.EnableS3(link.KeyringSecrets{Service: "worldhop"}, lic)
+	}
 
 	// Sources live in a config file the UI edits. On first run, seed it with the
 	// launcher folders that exist on this computer; -saves / -world add more.
@@ -140,11 +144,11 @@ func main() {
 	}
 	// The HTTP server is started on demand (Open Web View) and stopped again after
 	// idleTimeout without requests, so nothing listens while the UI isn't in use.
-	var providers api.Providers = api.StubProviders{} // -store mode has no cloud accounts
+	deps := api.Deps{Sources: cfg, Providers: api.StubProviders{}, License: lic} // -store mode has no cloud accounts
 	if cloud != nil {
-		providers = link.API{M: cloud}
+		deps.Providers, deps.ObjectStorage = link.API{M: cloud}, link.API{M: cloud}
 	}
-	lazy := api.NewLazy(*addr, svc, ui.Assets(), api.Deps{Sources: cfg, Providers: providers, License: lic}, idleTimeout)
+	lazy := api.NewLazy(*addr, svc, ui.Assets(), deps, idleTimeout)
 
 	openView := func() {
 		url, err := lazy.Ensure()
