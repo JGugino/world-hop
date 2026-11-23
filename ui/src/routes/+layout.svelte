@@ -91,10 +91,7 @@
 		</p>
 	{/if}
 	{#if status.error}<p class="banner err">Can't reach WorldHop: {status.error}</p>{/if}
-	{#if s}
-		<p class="banner">{s.lastResult}</p>
-		{#each s.warnings ?? [] as w}<p class="banner warn">{w}</p>{/each}
-	{/if}
+	{#if s}<StatusPanel status={s} />{/if}
 	{@render children()}
 	<footer>
 		WorldHop {s?.version ?? ''} is not an official Minecraft product and is not affiliated with Mojang

@@ -194,6 +194,20 @@ func main() {
 	tray.Run(tray.Handlers{
 		OpenView:  openView,
 		ForceSync: func() { svc.ForceSync(context.Background()) },
+		Exit:      func() { lazy.Close() },
+	}, func() {
+		// Keep the tray's hover text in step with the sync status.
+		go func() {
+			var last string
+			for {
+				if h := svc.Status().Headline(time.Now()); h != last {
+					last = h
+					tray.SetStatus(h)
+				}
+				time.Sleep(2 * time.Second)
+			}
+		}()
+	})
 		OpenUpdate: func(url string) {
 			if err := window.OpenBrowser(url); err != nil {
 				log.Printf("open update page: %v", err)

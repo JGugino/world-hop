@@ -58,6 +58,16 @@ type Engine struct {
 	// separate records and never mistake one for the other being newer.
 	StateScope func() string
 	Now        func() time.Time
+	// OnPhase, if set, is told when a sync starts moving data for a world:
+	// phase is "uploading" or "downloading". It may be called from any
+	// goroutine and must not block.
+	OnPhase func(worldID, phase string)
+}
+
+func (e *Engine) phase(worldID, phase string) {
+	if e.OnPhase != nil {
+		e.OnPhase(worldID, phase)
+	}
 }
 
 // New creates an engine, loading or creating this device's id.
@@ -466,6 +476,7 @@ func (e *Engine) pushWith(ctx context.Context, w worlds.World, v *view) (PushRes
 // the world taken just before; only files holding chunks the store does not
 // already have are read again.
 func (e *Engine) upload(ctx context.Context, w worlds.World, hs []head, sc *scanResult) (PushResult, error) {
+	e.phase(w.ID, "uploading")
 	known := map[string]manifest.ChunkLoc{}
 	var gen int64
 	var parents []string
@@ -620,6 +631,7 @@ func (e *Engine) Pull(ctx context.Context, w worlds.World) (PullResult, error) {
 // verifies every hash, then swaps it in atomically, keeping the replaced world
 // as a snapshot.
 func (e *Engine) apply(ctx context.Context, w worlds.World, h head, reason string) (PullResult, error) {
+	e.phase(w.ID, "downloading")
 	staging := stagingPath(w.Path)
 	if err := os.RemoveAll(staging); err != nil {
 		return PullResult{}, err

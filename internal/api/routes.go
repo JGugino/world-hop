@@ -81,12 +81,18 @@ func (s *Server) providers() Providers {
 
 type errBody struct {
 	Error string `json:"error"`
+	// Action and Fix are set for errors WorldHop can explain: what to do, and
+	// the UI page where to do it. Detail is the raw technical message.
+	Kind   string `json:"kind,omitempty"`
+	Action string `json:"action,omitempty"`
+	Fix    string `json:"fix,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 func writeErr(w http.ResponseWriter, code int, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(errBody{err.Error()})
+	json.NewEncoder(w).Encode(errBody{Error: err.Error()})
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -409,6 +415,9 @@ func writeServiceErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, sync.ErrWorldOpen), errors.Is(err, sync.ErrDestExists), errors.As(err, &ce):
 		writeErr(w, http.StatusConflict, err)
 	default:
-		writeErr(w, http.StatusInternalServerError, err)
+		p := sync.Explain(err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(errBody{Error: p.Title, Kind: p.Kind, Action: p.Action, Fix: p.Fix, Detail: p.Detail})
 	}
 }

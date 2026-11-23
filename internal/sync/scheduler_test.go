@@ -75,7 +75,7 @@ func TestSchedulerStartupPullsRemote(t *testing.T) {
 	if got, _ := os.ReadFile(filepath.Join(f.wa.Path, "level.dat")); string(got) != string(rnd(7, 3000)) {
 		t.Fatalf("world not pulled at startup: %s", f.ra.Status().LastResult)
 	}
-	if !strings.Contains(f.ra.Status().LastResult, "1 pulled") {
+	if !strings.Contains(f.ra.Status().LastResult, "1 downloaded") {
 		t.Fatalf("result: %s", f.ra.Status().LastResult)
 	}
 }
@@ -85,7 +85,7 @@ func TestSchedulerPushesOnCloseAfterSettle(t *testing.T) {
 	smallWorld(t, f.wa.Path, 1)
 	f.open[f.wa.Path] = true
 	f.sa.Poll(ctx) // startup pass: world open, must be skipped
-	if !strings.Contains(f.ra.Status().LastResult, "skipped (open") {
+	if len(f.ra.Status().Problems) != 1 || f.ra.Status().Problems[0].Kind != ProblemWorldOpen {
 		t.Fatalf("open world not skipped: %s", f.ra.Status().LastResult)
 	}
 	if st, _ := f.b.Status(ctx, f.wb); st != StatusNoRemote {
@@ -174,7 +174,7 @@ func TestForceSyncSharesLockWithScheduler(t *testing.T) {
 	f := newSchedFixture(t)
 	smallWorld(t, f.wa.Path, 1)
 	st := f.ra.ForceSync(ctx)
-	if !strings.Contains(st.LastResult, "1 pushed") {
+	if !strings.Contains(st.LastResult, "1 uploaded") {
 		t.Fatalf("force sync: %s", st.LastResult)
 	}
 	f.ra.pass.Lock()
