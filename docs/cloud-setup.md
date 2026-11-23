@@ -24,6 +24,12 @@ once, then build releases with them.
    This runs `go build -ldflags "-X github.com/JGugino/world-hopper/internal/link.DefaultGoogleClientID=... "`
    (see the `release` target in the makefile). Do not commit real IDs.
 
+   Put the values in a gitignored `.env` next to the makefile and every release target picks
+   them up. `make release-windows` cross-compiles `worldhop.exe` (no console window, default
+   browser instead of the native webview) and `make release-all` builds both. For the native
+   webview on Windows, build on a Windows machine with a C compiler (e.g. MinGW-w64) and run
+   the same `go build` as the `release-windows` target with `CGO_ENABLED=1` and `-tags webview`.
+
 These values are public client identifiers under PKCE, not confidential, and are visible in the
 binary. Google's desktop-app client secret is also not truly secret (Google documents this); it is
 only included because Google's token endpoint expects it.
