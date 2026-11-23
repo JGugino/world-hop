@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { sayBye, getUpdate, type UpdateInfo } from '$lib/api';
 	import { status } from '$lib/status.svelte';
+	import StatusPanel from '$lib/StatusPanel.svelte';
 
 	let { children } = $props();
 
@@ -134,7 +135,6 @@
 	.banner.update { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; border-left: 6px solid var(--accent); }
 	.banner.update .acts { display: flex; gap: 12px; align-items: center; }
 	.banner.update a { color: var(--accent); }
-	.banner.warn { border-left: 6px solid var(--warn); }
 	.banner.err { border-left: 6px solid var(--bad); color: var(--bad); }
 	footer { color: #7d858d; font-size: 0.8rem; margin-top: 32px; }
 </style>
