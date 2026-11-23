@@ -177,19 +177,21 @@
 	.ok { color: var(--ok); }
 	.bad { color: var(--bad); }
 	.warn { color: var(--warn); }
-	.check { display: flex; gap: 8px; align-items: flex-start; font-size: 0.9rem; }
+	.check { display: flex; gap: 8px; align-items: flex-start; font-size: 0.92rem; }
 	.danger-box {
 		border: 1px solid var(--bad);
-		border-radius: 6px;
-		padding: 8px 12px;
-		font-size: 0.9rem;
+		background: #00000040;
+		border-left-width: 6px;
+		padding: 8px 14px;
+		font-size: 0.92rem;
 	}
 	.badge {
-		font-size: 0.7rem;
-		background: var(--accent);
-		color: #fff;
-		border-radius: 4px;
-		padding: 1px 6px;
+		font-size: 0.8rem;
+		background: var(--warn);
+		color: #000;
+		text-shadow: none;
+		border: 2px solid #000;
+		padding: 0 7px;
 		vertical-align: middle;
 	}
 </style>

@@ -136,13 +136,5 @@
 	.ok { color: var(--ok); }
 	.bad { color: var(--bad); }
 	.warn { color: var(--warn); }
-	.field { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 0.9rem; }
-	select {
-		background: var(--bg);
-		color: var(--text);
-		border: 1px solid var(--line);
-		border-radius: 6px;
-		padding: 7px 10px;
-		font: inherit;
-	}
+	.field { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 0.92rem; }
 </style>

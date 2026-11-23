@@ -211,11 +211,14 @@
 		<p class="muted small">Cloud worlds unavailable: {cloudError}</p>
 	{/if}
 	{#each worlds as w (w.id)}
-		<section class="card">
+		<section class="card world">
 			<div class="head">
-				<div>
-					<h3>{w.name}</h3>
-					<p class="muted small"><code>{w.path}</code></p>
+				<div class="who">
+					<span class="ico" aria-hidden="true"></span>
+					<div>
+						<h3>{w.name}</h3>
+						<p class="muted small"><code>{w.path}</code></p>
+					</div>
 				</div>
 				<span class="badge {tone[w.status]}">{labels[w.status]}</span>
 			</div>
@@ -298,27 +301,29 @@
 {/if}
 
 <style>
-	h3 { margin: 0; font-size: 1rem; }
+	.world h3 { margin-bottom: 4px; }
+	.ico { flex: none; width: 36px; height: 36px; border: 2px solid #000; background: var(--grass); background-size: 72px 72px; position: relative; }
+	.ico::after { content: ''; position: absolute; left: 0; right: 0; top: 10px; bottom: 0; background: var(--dirt); background-size: 72px 72px; }
+	.who { display: flex; gap: 14px; align-items: flex-start; }
 	.head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 	.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
-	.badge { font-size: 0.8rem; padding: 2px 10px; border-radius: 999px; white-space: nowrap; border: 1px solid; }
+	.badge { font-size: 0.8rem; padding: 2px 9px; white-space: nowrap; background: #111315; border: 2px solid currentColor; align-self: flex-start; }
 	.badge.ok { color: var(--ok); }
-	.badge.info { color: var(--accent); }
+	.badge.info { color: var(--info); }
 	.badge.bad { color: var(--bad); }
 	.badge.muted { color: var(--muted); }
-	.note { margin: 8px 0 0; font-size: 0.9rem; color: var(--warn); }
+	.note { margin: 8px 0 0; font-size: 0.92rem; color: var(--warn); }
 	.note.bad { color: var(--bad); }
-	.conflict { border-left: 3px solid var(--bad); padding: 4px 12px; margin-top: 10px; }
+	.conflict { border: 2px solid #000; border-left: 6px solid var(--bad); background: #00000040; padding: 4px 14px 10px; margin-top: 12px; }
 	.conflict ul { padding-left: 18px; margin: 8px 0 0; }
-	.snaps { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+	.snaps { margin-top: 12px; border: 2px solid #000; background: #111315; box-shadow: inset 2px 2px 0 #000; padding: 4px 12px; }
 	.snaps ul { list-style: none; margin: 0; padding: 0; }
 	.snaps li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; flex-wrap: wrap; }
 	.cloud { list-style: none; margin: 8px 0 0; padding: 0; }
-	.cloud li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+	.cloud li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0; border-top: 2px solid #0006; flex-wrap: wrap; }
 	label.small { display: block; margin-top: 8px; }
 	select { max-width: 100%; }
-	.msg { margin: 12px 0 0; padding: 8px 12px; border-radius: 6px; background: var(--panel); font-size: 0.9rem; }
+	.msg { margin: 14px 0 0; padding: 8px 12px; background: var(--panel); border: 2px solid #000; box-shadow: inset 2px 2px 0 var(--panel-hi), inset -2px -2px 0 var(--panel-lo); font-size: 0.92rem; }
 	.msg.bad { border-left: 3px solid var(--bad); }
 	.msg.ok { border-left: 3px solid var(--ok); }
-	a { color: var(--accent); }
 </style>
