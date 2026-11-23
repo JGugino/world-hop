@@ -41,7 +41,8 @@ user can patch the binary; a key is not limited to a number of computers.
    GitHub release with the installers for you to review.
 
 Local release build: `make release GOOGLE_CLIENT_ID=... GUMROAD_PRODUCT_ID=...`
-(or put them in `.env`). `make release-windows` builds `worldhop.exe` and `make release-all` both.
+(or put them in `.env`). `make release-linux`, `release-windows` and `release-mac` (Mac only) build the other
+platforms, `make release-all` builds all of them, and every binary lands in `dist/`.
 A build without a product ID still runs but cannot activate Pro.
 
 ## Installers

@@ -110,9 +110,15 @@ end users never touch a config file.
 
 ```sh
 make release GOOGLE_CLIENT_ID=... GUMROAD_PRODUCT_ID=...   # current OS
-make release-windows                                        # worldhop.exe
-make release-all                                            # both
+make release-linux                                          # dist/worldhop-linux-amd64
+make release-windows                                        # dist/worldhop-windows-amd64.exe
+make release-mac                                            # dist/worldhop-macos-{arm64,amd64} (Mac only)
+make release-all                                            # Linux + Windows + macOS
 ```
+
+Every binary is written to `dist/` (gitignored; override with `DIST=...`). The macOS build needs
+cgo and Apple's SDK, so `release-mac` only runs on a Mac; `release-all` skips it with a warning
+elsewhere.
 
 Put the values in a gitignored `.env` next to the `makefile` and every release target picks them up.
 Never commit real IDs. Pushing a `v*` tag runs the `release` workflow, which builds each OS and opens a draft GitHub release.

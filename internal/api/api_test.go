@@ -33,3 +33,12 @@ func TestAPI(t *testing.T) {
 		t.Fatalf("host guard: %d", w.Code)
 	}
 }
+
+func TestUpdateEndpoint(t *testing.T) {
+	h := (&Server{svc: sync.NewRunner("t", nil, nil), assets: fstest.MapFS{"index.html": {Data: []byte("hi")}}}).Handler()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1/api/update", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":false`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}

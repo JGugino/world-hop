@@ -1,9 +1,11 @@
 package sync
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	stdsync "sync"
 	"testing"
 	"time"
 
@@ -181,4 +183,33 @@ func TestForceSyncSharesLockWithScheduler(t *testing.T) {
 	if st.State != "idle" {
 		t.Fatalf("state: %+v", st)
 	}
+}
+
+// Run is what main starts; the polling tests above call Poll directly, so
+// this checks the loop itself picks up a close without anyone forcing a sync.
+func TestSchedulerRunSyncsAfterClose(t *testing.T) {
+	f := newSchedFixture(t)
+	smallWorld(t, f.wa.Path, 1)
+	var mu stdsync.Mutex
+	open := true
+	isOpen := func(string) bool { mu.Lock(); defer mu.Unlock(); return open }
+	s := NewScheduler(f.ra, f.ra.listWorlds, isOpen,
+		SchedulerConfig{PollInterval: 10 * time.Millisecond, SyncInterval: time.Hour, Settle: 20 * time.Millisecond})
+	rctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { s.Run(rctx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	open = false
+	mu.Unlock()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, _ := f.b.Status(ctx, f.wb); st == StatusNoLocal {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("world not pushed after close: %s", f.ra.Status().LastResult)
 }

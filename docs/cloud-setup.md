@@ -25,8 +25,11 @@ once, then build releases with them.
    (see the `release` target in the makefile). Do not commit real IDs.
 
    Put the values in a gitignored `.env` next to the makefile and every release target picks
-   them up. `make release-windows` cross-compiles `worldhop.exe` (no console window, default
-   browser instead of the native webview) and `make release-all` builds both. For the native
+   them up. `make release-windows` cross-compiles `dist/worldhop-windows-amd64.exe` (no console
+   window, default browser instead of the native webview), `make release-linux` builds
+   `dist/worldhop-linux-amd64`, and `make release-mac` builds `dist/worldhop-macos-arm64` and
+   `-amd64` (macOS only: the tray needs cgo and Apple's SDK). `make release-all` builds all
+   three, skipping macOS with a warning when not run on a Mac. For the native
    webview on Windows, build on a Windows machine with a C compiler (e.g. MinGW-w64) and run
    the same `go build` as the `release-windows` target with `CGO_ENABLED=1` and `-tags webview`.
 

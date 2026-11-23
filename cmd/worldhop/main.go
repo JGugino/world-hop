@@ -21,13 +21,14 @@ import (
 	"github.com/JGugino/world-hopper/internal/store/localdir"
 	"github.com/JGugino/world-hopper/internal/sync"
 	"github.com/JGugino/world-hopper/internal/tray"
+	"github.com/JGugino/world-hopper/internal/update"
 	"github.com/JGugino/world-hopper/internal/window"
 	"github.com/JGugino/world-hopper/internal/worlds"
 	"github.com/JGugino/world-hopper/ui"
 )
 
 // version is overridden at release time with -ldflags "-X main.version=...".
-var version = "0.0.1"
+var version = "dev"
 
 // listFlag collects a repeatable flag.
 type listFlag []string
@@ -150,9 +151,20 @@ func main() {
 		}
 		return out
 	}
+	// Automatic syncing: a pass at startup, one when a world closes, and one
+	// every ten minutes. Without this only Force Sync ever ran.
+	schedCtx, stopSched := context.WithCancel(context.Background())
+	defer stopSched()
+	go sync.NewScheduler(svc, listWorlds, det.WorldOpen, sync.SchedulerConfig{}).Run(schedCtx)
+
 	// The HTTP server is started on demand (Open Web View) and stopped again after
 	// idleTimeout without requests, so nothing listens while the UI isn't in use.
-	deps := api.Deps{Sources: cfg, Providers: api.StubProviders{}, License: lic, Encryption: encStore} // -store mode has no cloud accounts
+	// Once a day, look for a newer release (never blocks startup, silent when
+	// offline). It only announces; the user chooses to open the download page.
+	upd := update.New(version, sd)
+	upd.OnChange = func(i update.Info) { tray.SetUpdate(i.Latest, i.URL) }
+	go upd.Run(context.Background())
+	deps := api.Deps{Sources: cfg, Providers: api.StubProviders{}, License: lic, Encryption: encStore, Updates: upd} // -store mode has no cloud accounts
 	if cloud != nil {
 		deps.Providers, deps.ObjectStorage = link.API{M: cloud}, link.API{M: cloud}
 	}
@@ -196,4 +208,11 @@ func main() {
 			}
 		}()
 	})
+		OpenUpdate: func(url string) {
+			if err := window.OpenBrowser(url); err != nil {
+				log.Printf("open update page: %v", err)
+			}
+		},
+		Exit:      func() { stopSched(); lazy.Close() },
+	}, nil)
 }
