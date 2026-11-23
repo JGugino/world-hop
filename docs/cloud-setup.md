@@ -58,3 +58,23 @@ last. Manifests are write-once: Drive checks for the name first.
 
 Dropbox support was removed to keep a single provider to support. The `store.Store` interface and the
 `link` provider table are still generic, so another provider can be added later.
+
+## S3-compatible storage (Pro)
+
+Pro users can store worlds in their own bucket instead of Google Drive: AWS S3, Cloudflare R2,
+Backblaze B2, Wasabi, MinIO or anything else that speaks the S3 API. Nothing needs registering
+with a provider; the user enters their own details on the **Cloud account** page:
+
+- **Endpoint**: empty for AWS S3, otherwise the service URL (for R2,
+  `https://<account>.r2.cloudflarestorage.com`; for MinIO, e.g. `http://localhost:9000`).
+- **Bucket**, optional **folder** (key prefix) and **region** (use `auto` for R2).
+- **Path-style addresses**: tick for MinIO and most self-hosted servers.
+- **Access key** and **secret key**. The secret (and access key) are stored in the system keychain;
+  only the non-secret settings are written to `s3.json` in the state directory.
+
+**Test connection** lists the bucket with the entered details without saving anything. The key needs
+list, read and write permission on the bucket. Objects use the same layout as the Google Drive
+store (`packs/<sha256>`, `worlds/<id>/manifest-….json`) under the optional folder.
+
+Pro gating uses the license check in `internal/license` (see docs/licensing.md): saving, testing, choosing
+S3, and every store call require Pro, so a lapsed license stops S3 syncing.

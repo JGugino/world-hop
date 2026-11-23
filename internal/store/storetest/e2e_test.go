@@ -12,6 +12,7 @@ import (
 	"github.com/JGugino/world-hopper/internal/httpx"
 	"github.com/JGugino/world-hopper/internal/store"
 	"github.com/JGugino/world-hopper/internal/store/gdrive"
+	"github.com/JGugino/world-hopper/internal/store/s3"
 	"github.com/JGugino/world-hopper/internal/store/storetest"
 	"github.com/JGugino/world-hopper/internal/sync"
 	"github.com/JGugino/world-hopper/internal/worlds"
@@ -114,4 +115,20 @@ func TestCloudOnlyDownloadOverFakeDrive(t *testing.T) {
 	if err != nil || !bytes.Equal(got, data) {
 		t.Fatalf("downloaded region differs: %v", err)
 	}
+}
+
+func TestEngineOverFakeS3(t *testing.T) {
+	httpx.BaseDelay = time.Millisecond
+	fake := storetest.NewFakeS3("bkt", "AK", "SK", "us-east-1")
+	defer fake.Close()
+	fake.Fail503 = 4
+	fake.PageSize = 3
+	twoDevice(t, func() store.Store {
+		s, err := s3.New(s3.Config{Endpoint: fake.URL, Bucket: "bkt", Prefix: "wh", PathStyle: true,
+			AccessKey: "AK", SecretKey: "SK"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}, fake.Keys)
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/zalando/go-keyring"
 
+	"github.com/JGugino/world-hopper/internal/license"
 	"github.com/JGugino/world-hopper/internal/store"
 )
 
@@ -20,7 +21,7 @@ var (
 	// "remember", or after locking).
 	ErrLocked = errors.New("encryption is on but locked: enter your passphrase under Encryption")
 	// ErrProRequired: turning encryption on is a Pro feature.
-	ErrProRequired = errors.New("encryption is a Pro feature")
+	ErrProRequired = license.ErrProRequired
 	// ErrNotConfirmed: creating a new key needs the passphrase twice and an
 	// explicit acknowledgement that a lost passphrase cannot be recovered.
 	ErrNotConfirmed = errors.New("type the passphrase twice and confirm that you understand it cannot be recovered")

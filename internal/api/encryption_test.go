@@ -35,7 +35,7 @@ func TestEncryptionAPI(t *testing.T) {
 	if w := do("GET", "/api/encryption", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"enabled":false`) || !strings.Contains(w.Body.String(), `"keyInStore":false`) {
 		t.Fatalf("get: %d %s", w.Code, w.Body)
 	}
-	if w := do("POST", "/api/encryption/enable", good); w.Code != 403 {
+	if w := do("POST", "/api/encryption/enable", good); w.Code != 402 {
 		t.Fatalf("free user: %d %s", w.Code, w.Body)
 	}
 	pro = true

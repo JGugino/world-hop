@@ -14,6 +14,7 @@ import (
 	stdsync "sync"
 
 	"github.com/JGugino/world-hopper/internal/httpx"
+	"github.com/JGugino/world-hopper/internal/license"
 	"github.com/JGugino/world-hopper/internal/oauth"
 	"github.com/JGugino/world-hopper/internal/store"
 	"github.com/JGugino/world-hopper/internal/store/gdrive"
@@ -46,6 +47,8 @@ type ProviderStatus struct {
 	Name       string `json:"name"`
 	Configured bool   `json:"configured"` // a client id is available
 	Linked     bool   `json:"linked"`     // tokens are stored
+	Pro        bool   `json:"pro"`        // needs a Pro licence
+	Locked     bool   `json:"locked"`     // Pro, and this computer has none
 }
 
 // Status is the snapshot served to the UI.
@@ -62,6 +65,8 @@ type provider struct {
 	hint       string // what to set when not configured
 	oauth      oauth.Config
 	newStore   func(httpx.Auth, *http.Client) store.Store
+	manual     bool // set up with a form, not an OAuth sign-in
+	pro        bool // needs a Pro licence
 }
 
 // Manager implements store.Store by delegating to the chosen, linked provider,
@@ -84,6 +89,9 @@ type Manager struct {
 	reauth  map[string]bool
 	sources map[string]*oauth.Source
 	stores  map[string]store.Store
+
+	secrets SecretStore     // set by EnableS3
+	license license.Checker // set by EnableS3
 }
 
 var _ store.Store = (*Manager)(nil)
@@ -147,6 +155,9 @@ func (m *Manager) saveChoice(id string) error {
 }
 
 func (m *Manager) linked(id string) bool {
+	if id == S3 {
+		return m.s3Linked()
+	}
 	_, err := m.tokens.Get(id)
 	return err == nil
 }
@@ -157,9 +168,15 @@ func (m *Manager) Status() Status {
 	defer m.mu.Unlock()
 	st := Status{Chosen: m.chosen, Error: m.lastErr}
 	ids := []string{GoogleDrive} // add new providers here
+	if m.providers[S3] != nil {
+		ids = append(ids, S3)
+	}
 	for _, id := range ids {
 		p := m.providers[id]
-		st.Providers = append(st.Providers, ProviderStatus{ID: id, Name: p.name, Configured: p.configured, Linked: m.linked(id)})
+		st.Providers = append(st.Providers, ProviderStatus{
+			ID: id, Name: p.name, Configured: p.configured, Linked: m.linked(id),
+			Pro: p.pro, Locked: p.pro && !m.Pro(),
+		})
 	}
 	switch {
 	case m.chosen == "":
@@ -182,6 +199,11 @@ func (m *Manager) Choose(id string) error {
 	if m.providers[id] == nil {
 		return ErrUnknownProvider
 	}
+	if m.providers[id].pro {
+		if err := license.Require(m.license); err != nil {
+			return err
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.saveChoice(id); err != nil {
@@ -200,6 +222,9 @@ func (m *Manager) StartLink(id string) (string, error) {
 	p := m.providers[id]
 	if p == nil {
 		return "", ErrUnknownProvider
+	}
+	if p.manual {
+		return "", ErrManualSetup
 	}
 	if !p.configured {
 		return "", &NotConfiguredError{Provider: p.name, Hint: p.hint}
@@ -275,7 +300,11 @@ func (m *Manager) Unlink(id string) error {
 		m.pending.Cancel()
 		m.pending = nil
 	}
-	if err := m.tokens.Delete(id); err != nil {
+	if id == S3 {
+		if err := m.forgetS3(); err != nil {
+			return err
+		}
+	} else if err := m.tokens.Delete(id); err != nil {
 		return err
 	}
 	m.resetProvider(id)
@@ -294,7 +323,22 @@ func (m *Manager) current() (store.Store, string, error) {
 	if m.reauth[id] {
 		return nil, id, oauth.ErrReauth
 	}
+	if m.providers[id].pro {
+		// Checked on every call, so a licence that lapses stops Pro storage
+		// even though the store is already built.
+		if err := license.Require(m.license); err != nil {
+			return nil, id, err
+		}
+	}
 	if s := m.stores[id]; s != nil {
+		return s, id, nil
+	}
+	if id == S3 {
+		s, err := m.newS3Store()
+		if err != nil {
+			return nil, id, err
+		}
+		m.stores[id] = s
 		return s, id, nil
 	}
 	if !m.linked(id) {
