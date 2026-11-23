@@ -22,6 +22,21 @@ export type World = {
 	launcher?: string;
 	status: WorldStatus;
 	open: boolean;
+	/** The free version is already syncing a different world. */
+	locked?: boolean;
+	error?: string;
+};
+
+export type CloudWorld = {
+	id: string;
+	name: string;
+	updatedAt: string | null;
+	size: number;
+	files: number;
+	/** Two computers uploaded without syncing; a conflict will be reported. */
+	diverged: boolean;
+	/** This computer had it before and it was removed, so it is not auto-downloaded. */
+	seen: boolean;
 	error?: string;
 };
 
@@ -42,6 +57,20 @@ export type Snapshot = {
 	id: string;
 	reason: string;
 	createdAt: string | null;
+};
+
+export type License = {
+	tier: 'free' | 'pro';
+	freeWorlds: number;
+	freeWorld?: string;
+	/** Masked. */
+	key?: string;
+	verifiedAt?: string;
+	/** Set when Pro is running on offline grace. */
+	graceEnds?: string;
+	canActivate: boolean;
+	purchaseUrl?: string;
+	error?: string;
 };
 
 export type ProviderId = 'gdrive';
@@ -96,6 +125,10 @@ export const getSnapshots = (id: string) =>
 export const restoreSnapshot = (id: string, snapshot: string) =>
 	call<void>('POST', `/api/worlds/${encodeURIComponent(id)}/restore`, { snapshot });
 
+export const getCloudWorlds = () => call<CloudWorld[]>('GET', '/api/cloud-worlds');
+export const downloadCloudWorld = (id: string, saves: string) =>
+	call<{ id: string }>('POST', `/api/cloud-worlds/${encodeURIComponent(id)}/download`, { saves });
+
 export const getSources = () => call<Source[]>('GET', '/api/sources');
 export const addSource = (kind: SourceKind, path: string) =>
 	call<Source[]>('POST', '/api/sources', { kind, path });
@@ -113,3 +146,9 @@ export const unlinkProvider = (id: ProviderId) =>
 export function sayBye() {
 	navigator.sendBeacon('/api/bye');
 }
+
+export const getLicense = () => call<License>('GET', '/api/license');
+export const activateLicense = (key: string) =>
+	call<License>('POST', '/api/license/activate', { key });
+export const deactivateLicense = () => call<License>('POST', '/api/license/deactivate');
+export const setFreeWorld = (id: string) => call<License>('POST', '/api/license/free-world', { id });

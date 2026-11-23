@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/JGugino/world-hopper/internal/config"
+	"github.com/JGugino/world-hopper/internal/license"
 	"github.com/JGugino/world-hopper/internal/sync"
 	"github.com/JGugino/world-hopper/internal/worlds"
 )
@@ -27,7 +29,19 @@ var _ SourceStore = (*config.Config)(nil)
 type Deps struct {
 	Sources   SourceStore
 	Providers Providers
+	License   Licenser
 }
+
+// Licenser is the license state the UI shows and edits. *license.Manager
+// implements it.
+type Licenser interface {
+	Info() license.Info
+	Activate(ctx context.Context, key string) error
+	Deactivate() error
+	SetFreeWorld(id string) error
+}
+
+var _ Licenser = (*license.Manager)(nil)
 
 func (s *Server) providers() Providers {
 	if s.deps.Providers == nil {
@@ -184,6 +198,86 @@ func (s *Server) routes(mux *http.ServeMux) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	mux.HandleFunc("GET /api/license", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.License == nil {
+			writeJSON(w, license.Info{Tier: "free", FreeWorlds: license.FreeWorlds})
+			return
+		}
+		writeJSON(w, s.deps.License.Info())
+	})
+	mux.HandleFunc("POST /api/license/activate", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.License == nil {
+			writeErr(w, http.StatusNotImplemented, license.ErrUnavailable)
+			return
+		}
+		var body struct {
+			Key string `json:"key"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		if err := s.deps.License.Activate(r.Context(), body.Key); err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		writeJSON(w, s.deps.License.Info())
+	})
+	mux.HandleFunc("POST /api/license/deactivate", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.License == nil {
+			writeErr(w, http.StatusNotImplemented, license.ErrUnavailable)
+			return
+		}
+		if err := s.deps.License.Deactivate(); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, s.deps.License.Info())
+	})
+	mux.HandleFunc("POST /api/license/free-world", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.License == nil {
+			writeErr(w, http.StatusNotImplemented, license.ErrUnavailable)
+			return
+		}
+		var body struct {
+			ID string `json:"id"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		if _, err := s.svc.FindWorld(body.ID); err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		if err := s.deps.License.SetFreeWorld(body.ID); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, s.deps.License.Info())
+	})
+
+	mux.HandleFunc("GET /api/cloud-worlds", func(w http.ResponseWriter, r *http.Request) {
+		cw, err := s.svc.CloudWorlds(r.Context())
+		if err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		writeJSON(w, cw)
+	})
+	mux.HandleFunc("POST /api/cloud-worlds/{id}/download", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Saves string `json:"saves"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		res, err := s.svc.DownloadWorld(r.Context(), r.PathValue("id"), body.Saves)
+		if err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"id": r.PathValue("id"), "snapshot": res.Snapshot})
+	})
+
 	mux.HandleFunc("GET /api/providers", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, s.providers().List(r.Context()))
 	})
@@ -207,13 +301,17 @@ func (s *Server) routes(mux *http.ServeMux) {
 func writeServiceErr(w http.ResponseWriter, err error) {
 	var ce *sync.ConflictError
 	switch {
-	case errors.Is(err, sync.ErrUnknownWorld), errors.Is(err, ErrUnknownProvider), errors.Is(err, os.ErrNotExist):
+	case errors.Is(err, sync.ErrUnknownWorld), errors.Is(err, sync.ErrNotInStore), errors.Is(err, ErrUnknownProvider), errors.Is(err, os.ErrNotExist):
 		writeErr(w, http.StatusNotFound, err)
-	case errors.Is(err, sync.ErrBadStrategy):
+	case errors.Is(err, sync.ErrBadStrategy), errors.Is(err, sync.ErrBadTarget):
 		writeErr(w, http.StatusBadRequest, err)
+	case errors.Is(err, license.ErrWorldLimit):
+		writeErr(w, http.StatusForbidden, err)
+	case errors.Is(err, license.ErrUnavailable):
+		writeErr(w, http.StatusNotImplemented, err)
 	case errors.Is(err, sync.ErrNoStore), errors.Is(err, ErrProviderUnavailable):
 		writeErr(w, http.StatusNotImplemented, err)
-	case errors.Is(err, sync.ErrWorldOpen), errors.As(err, &ce):
+	case errors.Is(err, sync.ErrWorldOpen), errors.Is(err, sync.ErrDestExists), errors.As(err, &ce):
 		writeErr(w, http.StatusConflict, err)
 	default:
 		writeErr(w, http.StatusInternalServerError, err)

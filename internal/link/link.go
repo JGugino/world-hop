@@ -363,6 +363,15 @@ func (m *Manager) ListManifests(ctx context.Context, world string) ([]string, er
 	return l, m.wrap(id, err)
 }
 
+func (m *Manager) ListWorlds(ctx context.Context) ([]string, error) {
+	s, id, err := m.current()
+	if err != nil {
+		return nil, err
+	}
+	l, err := s.ListWorlds(ctx)
+	return l, m.wrap(id, err)
+}
+
 // NotConfiguredError means this build has no OAuth client ID for the provider.
 // Its message is aimed at developers: end users of a release build never see it.
 type NotConfiguredError struct{ Provider, Hint string }

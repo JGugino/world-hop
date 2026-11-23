@@ -22,4 +22,7 @@ type Store interface {
 	GetManifest(ctx context.Context, worldID, name string) ([]byte, error)
 	// ListManifests returns manifest file names for a world (empty if none).
 	ListManifests(ctx context.Context, worldID string) ([]string, error)
+	// ListWorlds returns the ids of worlds that have at least one manifest,
+	// sorted. Used to offer worlds that exist only in the store.
+	ListWorlds(ctx context.Context) ([]string, error)
 }

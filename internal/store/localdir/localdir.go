@@ -140,6 +140,27 @@ func (d *Dir) ListManifests(_ context.Context, world string) ([]string, error) {
 	return out, nil
 }
 
+func (d *Dir) ListWorlds(_ context.Context) ([]string, error) {
+	ents, err := os.ReadDir(filepath.Join(d.Root, "worlds"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range ents {
+		if !e.IsDir() || !manifest.ValidID(e.Name()) {
+			continue
+		}
+		if names, err := d.ListManifests(context.Background(), e.Name()); err == nil && len(names) > 0 {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 func readFile(p string) ([]byte, error) {
 	b, err := os.ReadFile(p)
 	if errors.Is(err, fs.ErrNotExist) {

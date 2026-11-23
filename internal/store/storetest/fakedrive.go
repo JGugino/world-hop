@@ -60,6 +60,7 @@ func (d *FakeDrive) Names() []string {
 
 var (
 	nameQ = regexp.MustCompile(`^name='((?:[^'\\]|\\.)*)' and trashed=false$`)
+	kindQ = regexp.MustCompile(`^appProperties has \{ key='kind' and value='((?:[^'\\]|\\.)*)' \} and trashed=false$`)
 	propQ = regexp.MustCompile(`^appProperties has \{ key='world' and value='((?:[^'\\]|\\.)*)' \} and trashed=false$`)
 )
 
@@ -173,6 +174,9 @@ func (d *FakeDrive) list(w http.ResponseWriter, r *http.Request) {
 	if m := nameQ.FindStringSubmatch(q.Get("q")); m != nil {
 		name := unesc(m[1])
 		match = func(f *driveFile) bool { return f.Name == name }
+	} else if m := kindQ.FindStringSubmatch(q.Get("q")); m != nil {
+		kind := unesc(m[1])
+		match = func(f *driveFile) bool { return f.Props["kind"] == kind }
 	} else if m := propQ.FindStringSubmatch(q.Get("q")); m != nil {
 		world := unesc(m[1])
 		match = func(f *driveFile) bool { return f.Props["world"] == world }
