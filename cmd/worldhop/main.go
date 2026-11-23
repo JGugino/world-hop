@@ -142,6 +142,12 @@ func main() {
 		}
 	}()
 	svc.AutoDownload = true
+	if cloud != nil {
+		// Connecting or disconnecting an account changes what a sync can do, so
+		// run a pass now: it clears (or raises) the "no cloud account" message
+		// instead of leaving the last pass's result on screen.
+		cloud.OnChange = func() { svc.SyncAll(context.Background()) }
+	}
 	svc.SavesFolders = func() []string {
 		var out []string
 		for _, s := range cfg.Sources() {

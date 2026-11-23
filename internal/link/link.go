@@ -76,6 +76,10 @@ type Manager struct {
 	OpenURL func(url string) error
 	// HTTP is used for all provider calls (default: httpx.Shared, a pooled client).
 	HTTP *http.Client
+	// OnChange, if set, is called (in its own goroutine) after an account is
+	// connected, disconnected or reconfigured, so callers can re-check sync
+	// status instead of showing a stale "no cloud account" message.
+	OnChange func()
 
 	dir       string
 	tokens    oauth.TokenStore
@@ -270,6 +274,14 @@ func (m *Manager) finish(id string, pend *oauth.Pending) {
 		return
 	}
 	m.resetProvider(id)
+	m.changed()
+}
+
+// changed tells OnChange that the set of linked accounts changed.
+func (m *Manager) changed() {
+	if f := m.OnChange; f != nil {
+		go f()
+	}
 }
 
 func (m *Manager) resetProvider(id string) {
@@ -309,6 +321,7 @@ func (m *Manager) Unlink(id string) error {
 	}
 	m.resetProvider(id)
 	m.lastErr = ""
+	m.changed()
 	return nil
 }
 
