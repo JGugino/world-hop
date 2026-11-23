@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io/fs"
 	"net"
@@ -26,6 +27,10 @@ type Server struct {
 	// (POST /api/bye). The page may just be reloading, so callers should wait
 	// a grace period and check LastActivity before acting on it.
 	OnClosed func()
+
+	// Pick opens a native folder dialog. Nil uses the operating system's own;
+	// tests replace it.
+	Pick func(ctx context.Context, title string) (string, error)
 }
 
 // New listens on 127.0.0.1 (port 0 picks a free port unless addr says otherwise).
@@ -59,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	s.routes(mux)
+	s.registerPicker(mux)
 	mux.Handle("/", s.static())
 	return hostGuard(mux)
 }

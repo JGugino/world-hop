@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getSources, addSource, removeSource, type Source, type SourceKind } from '$lib/api';
+	import { getSources, addSource, removeSource, pickFolder, type Source, type SourceKind } from '$lib/api';
 
 	let sources = $state<Source[] | null>(null);
 	let error = $state('');
 	let kind = $state<SourceKind>('saves');
 	let path = $state('');
 	let adding = $state(false);
+	let picking = $state(false);
+	let pickerMissing = $state(false);
 	let confirmRemove = $state<string | null>(null);
 
 	const key = (s: Source) => `${s.kind}:${s.path}`;
@@ -32,6 +34,19 @@
 		adding = false;
 	}
 
+	async function browse() {
+		picking = true;
+		error = '';
+		try {
+			const r = await pickFolder();
+			if (r.path) path = r.path;
+		} catch {
+			// No native dialog on this system: the text box still works.
+			pickerMissing = true;
+		}
+		picking = false;
+	}
+
 	async function remove(s: Source) {
 		error = '';
 		try {
@@ -46,13 +61,13 @@
 </script>
 
 <section class="card">
-	<h2>Add a source</h2>
+	<h2>Add a saves location</h2>
 	<p class="muted small intro">
 		Add as many as you like. A <b>saves folder</b> syncs every world inside it, including worlds you
 		create later. A <b>single world</b> syncs just that one folder.
 	</p>
 	<form onsubmit={add}>
-		<div class="kinds" role="radiogroup" aria-label="Source type">
+		<div class="kinds" role="radiogroup" aria-label="Save type">
 			<label class="kind" class:on={kind === 'saves'}>
 				<input type="radio" bind:group={kind} value="saves" />
 				<span class="kind-text"><b>Saves folder</b><small>Every world inside</small></span>
@@ -69,14 +84,22 @@
 				aria-label="Folder path"
 				placeholder={kind === 'saves' ? '/home/you/.minecraft/saves' : '/home/you/.minecraft/saves/My World'}
 				required />
-			<button disabled={adding || !path.trim()}>{adding ? 'Adding…' : 'Add source'}</button>
+			{#if !pickerMissing}
+				<button type="button" class="secondary" onclick={browse} disabled={picking}>{picking ? 'Choosing…' : 'Browse…'}</button>
+			{/if}
+			<button disabled={adding || !path.trim()}>{adding ? 'Adding…' : 'Add'}</button>
 		</div>
+		{#if pickerMissing}
+			<p class="muted small hint">A folder picker isn't available on this system. Paste the folder path instead.</p>
+		{:else}
+			<p class="muted small hint">Click Browse to pick the folder, then Add.</p>
+		{/if}
 	</form>
 	{#if error}<p class="bad">{error}</p>{/if}
 </section>
 
 <section class="card">
-	<h2>Synced sources {#if sources && sources.length}<span class="count">{sources.length}</span>{/if}</h2>
+	<h2>Synced saves {#if sources && sources.length}<span class="count">{sources.length}</span>{/if}</h2>
 	{#if sources === null}
 		<p class="muted">Loading…</p>
 	{:else if sources.length === 0}
@@ -112,7 +135,7 @@
 				</li>
 			{/each}
 		</ul>
-		<p class="muted small foot">Removing a source stops syncing it. Your files and cloud copies are not deleted.</p>
+		<p class="muted small foot">Removing a save stops syncing it. Your files and cloud copies are not deleted.</p>
 	{/if}
 </section>
 
@@ -144,6 +167,7 @@
 	.empty-icon { width: 32px; height: 32px; margin: 0 auto 12px; background: var(--dirt); background-size: 64px; border: 2px solid #000; box-shadow: inset 0 8px 0 #4a9a35; image-rendering: pixelated; }
 	.empty-title { margin: 0 0 4px; font-weight: 600; }
 	.bad { color: var(--bad); }
+	.hint { margin-top: 8px; }
 	@media (max-width: 560px) {
 		.kinds { grid-template-columns: 1fr; }
 		li { flex-direction: column; align-items: stretch; }

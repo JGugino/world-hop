@@ -59,7 +59,7 @@ including pricing and how license checks work.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/sources.png" alt="Sources tab"><br><sub><b>Sources:</b> sync a whole saves folder or a single world.</sub></td>
+    <td width="50%"><img src="docs/images/sources.png" alt="Saves tab"><br><sub><b>Saves:</b> sync a whole saves folder or a single world.</sub></td>
     <td width="50%"><img src="docs/images/cloud.png" alt="Cloud account tab"><br><sub><b>Cloud account:</b> connect Google Drive, or your own S3 bucket with Pro.</sub></td>
   </tr>
   <tr>
@@ -76,7 +76,7 @@ including pricing and how license checks work.
    - **Linux:** install the `.deb`, or unpack the `.tar.gz`. The tray needs a desktop with AppIndicator support.
 2. Click the WorldHop icon in your tray and choose **Open Web View**.
 3. Go to **Cloud account** and click **Connect** on Google Drive.
-4. Go to **Sources** and add your saves folder.
+4. Go to **Saves** and add your saves folder.
 5. Repeat on your other computer. Worlds that are in the cloud but not on that computer show up under **Cloud worlds** with a **Download** button. Downloading creates a new folder and never overwrites anything.
 
 > WorldHop is not an official Minecraft product and is not affiliated with Mojang or Microsoft.

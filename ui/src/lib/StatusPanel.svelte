@@ -8,7 +8,7 @@
 		'/cloud': 'Open Cloud account',
 		'/license': 'Open License',
 		'/encryption': 'Open Encryption',
-		'/sources': 'Open Sources'
+		'/sources': 'Open Saves'
 	};
 	const phase = {
 		checking: 'Checking for changes',

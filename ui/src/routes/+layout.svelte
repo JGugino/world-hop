@@ -10,7 +10,7 @@
 
 	const tabs = [
 		{ href: '/', label: 'Worlds' },
-		{ href: '/sources', label: 'Sources' },
+		{ href: '/sources', label: 'Saves' },
 		{ href: '/cloud', label: 'Cloud account' },
 		{ href: '/encryption', label: 'Encryption' },
 		{ href: '/license', label: 'License' }
