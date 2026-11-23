@@ -136,7 +136,7 @@
 					{:else if prov.pending}
 						<p class="muted small">Waiting for you to approve access in your browser…</p>
 					{:else if !prov.available}
-						<p class="muted small">Coming soon.</p>
+						<p class="bad small">{prov.note ?? 'Not available in this build.'}</p>
 					{:else}
 						<p class="muted small">Not connected.</p>
 					{/if}

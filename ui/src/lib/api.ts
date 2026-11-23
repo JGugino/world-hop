@@ -113,6 +113,8 @@ export type Provider = {
 	name: string;
 	/** False while this build has no implementation for the provider. */
 	available: boolean;
+	/** Why it is unavailable (missing OAuth client ID, -store mode). */
+	note?: string;
 	linked: boolean;
 	/** Consent page opened; waiting for the user to finish in the browser. */
 	pending: boolean;

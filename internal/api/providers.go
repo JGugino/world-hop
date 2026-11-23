@@ -11,11 +11,14 @@ type Provider struct {
 	Name string `json:"name"`
 	// Available is false while the provider is not implemented in this build;
 	// the UI shows it greyed out.
-	Available bool   `json:"available"`
-	Linked    bool   `json:"linked"`
-	Pending   bool   `json:"pending"`           // consent page opened, waiting for the user
-	Account   string `json:"account,omitempty"` // e.g. the account's email
-	Error     string `json:"error,omitempty"`   // e.g. "access revoked, reconnect"
+	Available bool `json:"available"`
+	// Note says why the provider is not available (shown instead of a bare
+	// "coming soon"), e.g. that this build has no OAuth client ID.
+	Note    string `json:"note,omitempty"`
+	Linked  bool   `json:"linked"`
+	Pending bool   `json:"pending"`           // consent page opened, waiting for the user
+	Account string `json:"account,omitempty"` // e.g. the account's email
+	Error   string `json:"error,omitempty"`   // e.g. "access revoked, reconnect"
 	// Pro marks a provider that needs a Pro licence; Locked means this
 	// computer has none, so the UI shows it as an upgrade rather than a form.
 	Pro    bool `json:"pro,omitempty"`
@@ -51,7 +54,8 @@ type StubProviders struct{}
 
 func (StubProviders) List(context.Context) []Provider {
 	return []Provider{
-		{ID: "gdrive", Name: "Google Drive"},
+		{ID: "gdrive", Name: "Google Drive",
+			Note: "Cloud accounts are off because WorldHop was started with -store (a shared folder). Start it without -store to connect Google Drive."},
 	}
 }
 
