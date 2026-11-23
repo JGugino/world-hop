@@ -10,6 +10,7 @@
 		{ href: '/', label: 'Worlds' },
 		{ href: '/sources', label: 'Sources' },
 		{ href: '/cloud', label: 'Cloud account' },
+		{ href: '/encryption', label: 'Encryption' },
 		{ href: '/license', label: 'License' }
 	];
 
@@ -110,7 +111,7 @@
 	:global(button.danger) { background: transparent; border: 1px solid var(--bad); color: var(--bad); }
 	:global(button:disabled) { opacity: 0.5; cursor: default; }
 	:global(button:focus-visible, a:focus-visible, input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
-	:global(input[type='text']) {
+	:global(input[type='text'], input[type='password']) {
 		background: var(--bg);
 		color: var(--text);
 		border: 1px solid var(--line);

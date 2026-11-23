@@ -12,6 +12,7 @@ import (
 
 	"github.com/JGugino/world-hopper/internal/api"
 	"github.com/JGugino/world-hopper/internal/config"
+	"github.com/JGugino/world-hopper/internal/crypt"
 	"github.com/JGugino/world-hopper/internal/detect"
 	"github.com/JGugino/world-hopper/internal/license"
 	"github.com/JGugino/world-hopper/internal/link"
@@ -71,14 +72,21 @@ func main() {
 		cloud.OpenURL = window.OpenBrowser
 		st = cloud
 	}
-	engine, err := sync.New(st, sd)
-	if err != nil {
-		log.Fatal(err)
-	}
 	lic, err := license.New(sd)
 	if err != nil {
 		log.Fatal(err)
 	}
+	// Client-side encryption wraps whichever store is in use. Off by default;
+	// turning it on is a Pro feature (see Encryption in the web view).
+	encStore, err := crypt.NewManager(st, sd, crypt.KeyringKeys{Service: "worldhop"}, lic.Pro)
+	if err != nil {
+		log.Fatal(err)
+	}
+	engine, err := sync.New(encStore, sd)
+	if err != nil {
+		log.Fatal(err)
+	}
+	engine.StateScope = encStore.Scope
 	engine.Authorize = lic.Authorize
 
 	// Sources live in a config file the UI edits. On first run, seed it with the
@@ -144,7 +152,7 @@ func main() {
 	if cloud != nil {
 		providers = link.API{M: cloud}
 	}
-	lazy := api.NewLazy(*addr, svc, ui.Assets(), api.Deps{Sources: cfg, Providers: providers, License: lic}, idleTimeout)
+	lazy := api.NewLazy(*addr, svc, ui.Assets(), api.Deps{Sources: cfg, Providers: providers, License: lic, Encryption: encStore}, idleTimeout)
 
 	openView := func() {
 		url, err := lazy.Ensure()

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/JGugino/world-hopper/internal/config"
+	"github.com/JGugino/world-hopper/internal/crypt"
 	"github.com/JGugino/world-hopper/internal/license"
 	"github.com/JGugino/world-hopper/internal/sync"
 	"github.com/JGugino/world-hopper/internal/worlds"
@@ -30,7 +31,22 @@ type Deps struct {
 	Sources   SourceStore
 	Providers Providers
 	License   Licenser
+	// Encryption is the client-side encryption settings. Nil when the build
+	// has no encryption (the endpoints then report 501).
+	Encryption Encrypter
 }
+
+// Encrypter is the encryption state the UI shows and edits. *crypt.Manager
+// implements it.
+type Encrypter interface {
+	Info(ctx context.Context) crypt.Info
+	Enable(ctx context.Context, pass, confirm string, acknowledged, remember bool) error
+	Unlock(ctx context.Context, pass string, remember bool) error
+	Lock() error
+	Disable() error
+}
+
+var _ Encrypter = (*crypt.Manager)(nil)
 
 // Licenser is the license state the UI shows and edits. *license.Manager
 // implements it.
@@ -198,6 +214,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	s.encryptionRoutes(mux)
+
 	mux.HandleFunc("GET /api/license", func(w http.ResponseWriter, r *http.Request) {
 		if s.deps.License == nil {
 			writeJSON(w, license.Info{Tier: "free", FreeWorlds: license.FreeWorlds})
@@ -305,6 +323,14 @@ func writeServiceErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusNotFound, err)
 	case errors.Is(err, sync.ErrBadStrategy), errors.Is(err, sync.ErrBadTarget):
 		writeErr(w, http.StatusBadRequest, err)
+	case errors.Is(err, crypt.ErrWrongPassphrase):
+		writeErr(w, http.StatusUnauthorized, err)
+	case errors.Is(err, crypt.ErrProRequired):
+		writeErr(w, http.StatusForbidden, err)
+	case errors.Is(err, crypt.ErrNotConfirmed), errors.Is(err, crypt.ErrWeakPassphrase):
+		writeErr(w, http.StatusBadRequest, err)
+	case errors.Is(err, crypt.ErrLocked):
+		writeErr(w, http.StatusLocked, err)
 	case errors.Is(err, license.ErrWorldLimit):
 		writeErr(w, http.StatusForbidden, err)
 	case errors.Is(err, license.ErrUnavailable):
