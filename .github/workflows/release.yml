@@ -64,10 +64,8 @@ jobs:
         if: matrix.target == 'windows'
         shell: bash
         run: |
-          make release OUT=worldhop.exe
-          mkdir -p dist
+          make release OUT=dist/worldhop.exe
           cp README.md dist/README.md
-          cp worldhop.exe dist/
           cd dist && 7z a "WorldHop-$VERSION-windows-amd64.zip" worldhop.exe README.md
           rm worldhop.exe README.md
 

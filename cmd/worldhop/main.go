@@ -151,6 +151,12 @@ func main() {
 		}
 		return out
 	}
+	// Automatic syncing: a pass at startup, one when a world closes, and one
+	// every ten minutes. Without this only Force Sync ever ran.
+	schedCtx, stopSched := context.WithCancel(context.Background())
+	defer stopSched()
+	go sync.NewScheduler(svc, listWorlds, det.WorldOpen, sync.SchedulerConfig{}).Run(schedCtx)
+
 	// The HTTP server is started on demand (Open Web View) and stopped again after
 	// idleTimeout without requests, so nothing listens while the UI isn't in use.
 	// Once a day, look for a newer release (never blocks startup, silent when
@@ -193,6 +199,6 @@ func main() {
 				log.Printf("open update page: %v", err)
 			}
 		},
-		Exit: func() { lazy.Close() },
+		Exit:      func() { stopSched(); lazy.Close() },
 	}, nil)
 }
