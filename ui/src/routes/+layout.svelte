@@ -1,4 +1,5 @@
 <script lang="ts">
+	import '$lib/theme.css';
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { sayBye } from '$lib/api';
@@ -37,21 +38,25 @@
 </script>
 
 <header>
+	<div class="grass" aria-hidden="true"></div>
 	<div class="wrap bar">
-		<div>
-			<h1>WorldHop</h1>
-			<p class="muted small">Keep your Minecraft worlds in sync between computers.</p>
+		<div class="brand">
+			<img src="/favicon.svg" alt="" width="56" height="56" />
+			<div>
+				<h1>WorldHop</h1>
+				<p class="tag">Keep your Minecraft worlds in sync between computers.</p>
+			</div>
 		</div>
 		<div class="syncbox">
 			<button onclick={() => status.sync()} disabled={s?.state === 'syncing'}>
 				{s?.state === 'syncing' ? 'Syncing…' : 'Force sync'}
 			</button>
-			<span class="muted small">Last sync: {s ? ago(s.lastSync) : '…'}</span>
+			<span class="last">Last sync: {s ? ago(s.lastSync) : '…'}</span>
 		</div>
 	</div>
-	<nav class="wrap">
+	<nav class="wrap" aria-label="Sections">
 		{#each tabs as t}
-			<a href={t.href} class:active={page.url.pathname === t.href}>{t.label}</a>
+			<a href={t.href} class:active={page.url.pathname === t.href} aria-current={page.url.pathname === t.href ? 'page' : undefined}>{t.label}</a>
 		{/each}
 	</nav>
 </header>
@@ -70,72 +75,63 @@
 </main>
 
 <style>
-	:global(:root) {
-		--bg: #15181c;
-		--panel: #1f242a;
-		--line: #2c333b;
-		--text: #e8eaed;
-		--muted: #9aa0a6;
-		--accent: #3b82f6;
-		--ok: #34d399;
-		--warn: #fbbf24;
-		--bad: #f87171;
+	.wrap { max-width: 800px; margin: 0 auto; padding: 0 16px; }
+	header { background: #00000066; border-bottom: 4px solid #000; }
+	.grass {
+		height: 24px;
+		background: var(--grass);
+		background-size: 128px 128px;
+		border-bottom: 4px solid #000;
+		box-shadow: inset 0 -8px 0 #2f6b21;
+		/* ragged pixel edge where the grass meets the dirt */
+		position: relative;
 	}
-	:global(body) {
-		margin: 0;
-		font-family: system-ui, sans-serif;
-		background: var(--bg);
-		color: var(--text);
-		line-height: 1.45;
+	.grass::after {
+		content: '';
+		position: absolute;
+		left: 0; right: 0; top: 100%;
+		height: 8px;
+		background: repeating-linear-gradient(90deg, #2f6b21 0 16px, transparent 16px 40px, #2f6b21 40px 56px, transparent 56px 96px, #2f6b21 96px 112px, transparent 112px 144px);
+		margin-top: 4px;
 	}
-	:global(h2) { margin: 0 0 12px; font-size: 1.1rem; }
-	:global(.muted) { color: var(--muted); }
-	:global(.small) { font-size: 0.85rem; margin: 0; }
-	:global(.card) {
-		background: var(--panel);
-		border: 1px solid var(--line);
-		border-radius: 8px;
-		padding: 12px 16px;
-		margin: 12px 0;
-	}
-	:global(button) {
-		background: var(--accent);
-		color: #fff;
-		border: 0;
-		border-radius: 6px;
-		padding: 7px 14px;
-		cursor: pointer;
-		font: inherit;
-	}
-	:global(button.secondary) { background: transparent; border: 1px solid var(--line); color: var(--text); }
-	:global(button.danger) { background: transparent; border: 1px solid var(--bad); color: var(--bad); }
-	:global(button:disabled) { opacity: 0.5; cursor: default; }
-	:global(button:focus-visible, a:focus-visible, input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
-	:global(input[type='text'], input[type='password']) {
-		background: var(--bg);
-		color: var(--text);
-		border: 1px solid var(--line);
-		border-radius: 6px;
-		padding: 7px 10px;
-		font: inherit;
-	}
-	:global(code) { font-size: 0.85rem; word-break: break-all; }
-	.wrap { max-width: 760px; margin: 0 auto; padding: 0 16px; }
-	header { border-bottom: 1px solid var(--line); padding-top: 20px; }
-	.bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
-	h1 { margin: 0; font-size: 1.5rem; }
-	.syncbox { display: flex; align-items: center; gap: 12px; }
-	nav { display: flex; gap: 4px; margin-top: 12px; }
+	.bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding-top: 20px; padding-bottom: 8px; }
+	.brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+	.brand img { flex: none; image-rendering: pixelated; filter: drop-shadow(4px 4px 0 #000a); }
+	h1 { margin: 0; font-size: 1.35rem; color: #fff; text-shadow: 4px 4px 0 #000, 0 0 0 #000; }
+	h1::first-letter { color: var(--accent); }
+	.tag { margin: 4px 0 0; font-size: 1.1rem; color: #e8e0d4; text-shadow: 2px 2px 0 #000; }
+	.syncbox { display: flex; align-items: center; gap: 14px; }
+	.last { color: #fff; text-shadow: 2px 2px 0 #000; }
+	nav { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 	nav a {
-		color: var(--muted);
+		color: #fff;
 		text-decoration: none;
-		padding: 8px 12px;
-		border-bottom: 2px solid transparent;
+		font-size: 1.3rem;
+		padding: 8px 16px 6px;
+		background: #4a4a4f var(--stone);
+		background-size: 64px 64px;
+		border: 3px solid #000;
+		border-bottom: 0;
+		box-shadow: inset 3px 3px 0 #6b6b71, inset -3px 0 0 #2a2a2d;
+		text-shadow: 2px 2px 0 #000a;
+		margin-bottom: -4px;
+		padding-bottom: 8px;
 	}
-	nav a.active { color: var(--text); border-color: var(--accent); }
-	main { padding-bottom: 24px; }
-	.banner { background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 12px 0 0; font-size: 0.9rem; }
-	.banner.warn { border-left: 3px solid var(--warn); }
-	.banner.err { border-left: 3px solid var(--bad); color: var(--bad); }
-	footer { color: #6b7280; font-size: 0.8rem; margin-top: 32px; }
+	nav a:hover { background-color: #66666c; }
+	nav a.active {
+		background: #3a3a3d var(--stone);
+		background-size: 64px 64px;
+		box-shadow: inset 3px 3px 0 #6b6b71, inset -3px 0 0 #2a2a2d, inset 0 6px 0 var(--accent);
+		padding-top: 14px;
+		color: #fff;
+	}
+	main { padding-bottom: 28px; }
+	.banner {
+		background: #1b1b1d; border: 4px solid #000;
+		box-shadow: inset 3px 3px 0 #000, inset -3px -3px 0 #4e4e53;
+		padding: 10px 14px; margin: 18px 0 0; font-size: 1.25rem;
+	}
+	.banner.warn { border-left-color: var(--warn); color: var(--warn); }
+	.banner.err { border-left-color: var(--bad); color: var(--bad); }
+	footer { color: #e8e0d4; text-shadow: 2px 2px 0 #000; font-size: 1.1rem; margin-top: 36px; }
 </style>
