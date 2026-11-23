@@ -244,3 +244,29 @@ func TestLoadConfig(t *testing.T) {
 		t.Fatal(err) // missing file is fine
 	}
 }
+
+// Linking and unlinking must notify OnChange so the app can re-run a sync pass;
+// otherwise the "no cloud account is connected" message from the last pass
+// stays on screen after the account connects.
+func TestOnChangeFiresOnLinkAndUnlink(t *testing.T) {
+	e := newEnv(t, both)
+	changed := make(chan struct{}, 4)
+	e.m.OnChange = func() { changed <- struct{}{} }
+	wait := func(what string) {
+		t.Helper()
+		select {
+		case <-changed:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("OnChange not called after %s", what)
+		}
+	}
+	if _, err := e.m.StartLink(GoogleDrive); err != nil {
+		t.Fatal(err)
+	}
+	e.waitState(t, StateLinked)
+	wait("linking")
+	if err := e.m.Unlink(GoogleDrive); err != nil {
+		t.Fatal(err)
+	}
+	wait("unlinking")
+}

@@ -223,6 +223,7 @@ func (m *Manager) SaveS3(in S3Input) error {
 	}
 	m.chosen, m.lastErr = S3, ""
 	m.resetProvider(S3)
+	m.changed()
 	return nil
 }
 
