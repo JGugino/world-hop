@@ -37,24 +37,34 @@ func rename(from, to string) error {
 // At every instant either the old or the new world is present at world; a
 // crash in the middle is repaired by Recover.
 func swapIn(world, staging string) error {
-	old := oldPath(world)
-	if err := os.RemoveAll(old); err != nil {
+	if _, err := swapKeepOld(world, staging); err != nil {
 		return err
 	}
-	_, err := os.Stat(world)
-	hadOld := err == nil
+	return os.RemoveAll(oldPath(world))
+}
+
+// swapKeepOld is swapIn without the final delete: the replaced world is left
+// at oldPath(world) for the caller to keep or remove. hadOld says whether
+// there was one.
+func swapKeepOld(world, staging string) (hadOld bool, err error) {
+	old := oldPath(world)
+	if err := os.RemoveAll(old); err != nil {
+		return false, err
+	}
+	_, err = os.Stat(world)
+	hadOld = err == nil
 	if hadOld {
 		if err := rename(world, old); err != nil {
-			return fmt.Errorf("swap: move old world aside: %w", err)
+			return false, fmt.Errorf("swap: move old world aside: %w", err)
 		}
 	}
 	if err := rename(staging, world); err != nil {
 		if hadOld {
 			rename(old, world) // roll back
 		}
-		return fmt.Errorf("swap: move new world into place: %w", err)
+		return false, fmt.Errorf("swap: move new world into place: %w", err)
 	}
-	return os.RemoveAll(old)
+	return hadOld, nil
 }
 
 // Recover repairs an interrupted swap for the world at path: if the world is

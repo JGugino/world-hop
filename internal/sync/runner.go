@@ -132,26 +132,19 @@ func (r *Runner) run(ctx context.Context, ws []worlds.World, full bool) (string,
 		if ctx.Err() != nil {
 			return "Sync cancelled.", warnings
 		}
-		st, err := r.engine.Status(ctx, w)
-		if err == nil {
-			switch st {
-			case StatusLocalAhead, StatusNoRemote:
-				var res PushResult
-				if res, err = r.engine.Push(ctx, w); err == nil && res.Pushed {
-					pushed++
-				} else if err == nil {
-					synced++
-				}
-			case StatusRemoteAhead:
-				if _, err = r.engine.Pull(ctx, w); err == nil {
-					pulled++
-				} else if errors.Is(err, ErrWorldOpen) {
-					warnings = append(warnings, fmt.Sprintf("%s has a newer version in the cloud but is open in Minecraft. Close it to update.", w.Name))
-				}
-			case StatusConflict:
+		res, err := r.engine.Sync(ctx, w)
+		if err == nil || errors.Is(err, ErrWorldOpen) {
+			switch {
+			case res.Pushed:
+				pushed++
+			case res.Pulled:
+				pulled++
+			case res.Status == StatusConflict:
 				conflicts++
-			default: // synced, or remote-only world with no local copy
-				synced++
+			case res.Status == StatusRemoteAhead && err != nil:
+				warnings = append(warnings, fmt.Sprintf("%s has a newer version in the cloud but is open in Minecraft. Close it to update.", w.Name))
+			case err == nil:
+				synced++ // up to date, or a cloud-only world with no local copy
 			}
 		}
 		var ce *ConflictError

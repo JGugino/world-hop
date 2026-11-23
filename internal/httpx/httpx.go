@@ -28,6 +28,21 @@ type StatusError struct {
 
 func (e *StatusError) Error() string { return fmt.Sprintf("http %d: %s", e.Code, e.Body) }
 
+// NewTransport returns a transport for talking to one cloud provider with
+// several requests at once. The default transport keeps only 2 idle
+// connections per host, so a pool of concurrent uploads would keep closing and
+// reopening TLS connections (a few round trips each time).
+func NewTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = 64
+	t.MaxIdleConnsPerHost = 16
+	t.ForceAttemptHTTP2 = true
+	return t
+}
+
+// Shared is the client used when a caller does not supply one.
+var Shared = &http.Client{Transport: NewTransport()}
+
 // Tunables, variables so tests can run fast.
 var (
 	MaxAttempts = 5
@@ -57,7 +72,7 @@ func delay(attempt int, resp *http.Response) time.Duration {
 // The caller closes the returned body.
 func Do(ctx context.Context, c *http.Client, build func() (*http.Request, error)) (*http.Response, error) {
 	if c == nil {
-		c = http.DefaultClient
+		c = Shared
 	}
 	var lastErr error
 	for attempt := 0; attempt < MaxAttempts; attempt++ {

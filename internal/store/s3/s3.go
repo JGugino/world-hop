@@ -99,7 +99,7 @@ func New(cfg Config, hc *http.Client) (*Store, error) {
 		return nil, err
 	}
 	if hc == nil {
-		hc = &http.Client{Timeout: 10 * time.Minute}
+		hc = &http.Client{Timeout: 10 * time.Minute, Transport: httpx.NewTransport()}
 	}
 	c := *hc
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

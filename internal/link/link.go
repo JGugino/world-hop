@@ -74,7 +74,7 @@ type provider struct {
 type Manager struct {
 	// OpenURL, if set, is called with the consent URL when linking starts.
 	OpenURL func(url string) error
-	// HTTP is used for all provider calls (default: http.DefaultClient).
+	// HTTP is used for all provider calls (default: httpx.Shared, a pooled client).
 	HTTP *http.Client
 
 	dir       string
