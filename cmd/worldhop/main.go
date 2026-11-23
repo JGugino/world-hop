@@ -12,6 +12,14 @@ import (
 
 	"github.com/JGugino/world-hopper/internal/api"
 	"github.com/JGugino/world-hopper/internal/config"
+	"github.com/JGugino/world-hopper/internal/detect"
+	"github.com/JGugino/world-hopper/internal/license"
+	"github.com/JGugino/world-hopper/internal/link"
+	"github.com/JGugino/world-hopper/internal/oauth"
+	"github.com/JGugino/world-hopper/internal/store"
+	"github.com/JGugino/world-hopper/internal/store/localdir"
+	"github.com/JGugino/world-hopper/internal/sync"
+	"github.com/JGugino/world-hopper/internal/tray"
 	"github.com/JGugino/world-hopper/internal/window"
 	"github.com/JGugino/world-hopper/internal/worlds"
 	"github.com/JGugino/world-hopper/ui"
@@ -132,14 +140,6 @@ func main() {
 	}
 	// The HTTP server is started on demand (Open Web View) and stopped again after
 	// idleTimeout without requests, so nothing listens while the UI isn't in use.
-	"github.com/JGugino/world-hopper/internal/detect"
-	"github.com/JGugino/world-hopper/internal/license"
-	"github.com/JGugino/world-hopper/internal/link"
-	"github.com/JGugino/world-hopper/internal/oauth"
-	"github.com/JGugino/world-hopper/internal/store"
-	"github.com/JGugino/world-hopper/internal/store/localdir"
-	"github.com/JGugino/world-hopper/internal/sync"
-	"github.com/JGugino/world-hopper/internal/tray"
 	var providers api.Providers = api.StubProviders{} // -store mode has no cloud accounts
 	if cloud != nil {
 		providers = link.API{M: cloud}

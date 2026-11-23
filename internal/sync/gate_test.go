@@ -2,6 +2,8 @@ package sync
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -48,5 +50,20 @@ func TestRunnerReportsLimitedWorlds(t *testing.T) {
 	}
 	if wi := r.Worlds(ctx); !wi[0].Locked {
 		t.Fatal("world should be marked locked")
+	}
+}
+
+func TestAuthorizeGatesDownload(t *testing.T) {
+	a, b, _ := twoDevices(t)
+	fixtureWorld(t, a.w.Path, 1)
+	if _, err := a.e.Push(ctx, a.w); err != nil {
+		t.Fatal(err)
+	}
+	b.e.Authorize = func(string) error { return license.ErrWorldLimit }
+	if _, err := b.e.Download(ctx, "Survival", filepath.Dir(b.w.Path)); !errors.Is(err, license.ErrWorldLimit) {
+		t.Fatalf("download: %v", err)
+	}
+	if _, err := os.Stat(b.w.Path); err == nil {
+		t.Fatal("a refused download must not create the world")
 	}
 }

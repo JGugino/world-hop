@@ -68,6 +68,11 @@ func (e *Engine) Download(ctx context.Context, id, savesDir string) (PullResult,
 	if !manifest.ValidID(id) {
 		return PullResult{}, fmt.Errorf("bad world id %q", id)
 	}
+	if e.Authorize != nil { // license gate
+		if err := e.Authorize(id); err != nil {
+			return PullResult{}, err
+		}
+	}
 	st, err := os.Stat(savesDir)
 	if err != nil || !st.IsDir() {
 		return PullResult{}, fmt.Errorf("%s is not a folder", savesDir)

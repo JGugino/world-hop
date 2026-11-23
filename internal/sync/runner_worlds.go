@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/JGugino/world-hopper/internal/license"
 	"github.com/JGugino/world-hopper/internal/worlds"
 )
 
@@ -122,6 +123,7 @@ func (r *Runner) Restore(id, snapshotID string) error {
 
 // FindWorld looks a world up by id among the configured sources.
 func (r *Runner) FindWorld(id string) (worlds.World, error) { return r.find(id) }
+
 // CloudWorld is a world that is in the store but has no copy on this computer.
 type CloudWorld struct {
 	ID        string     `json:"id"`
@@ -241,6 +243,8 @@ func (r *Runner) autoDownload(ctx context.Context, local []worlds.World) (int, e
 		switch {
 		case err == nil:
 			n++
+		case errors.Is(err, license.ErrWorldLimit):
+			// the free version is already using its world; leave the rest in the cloud list
 		case errors.Is(err, ErrDestExists):
 			// a folder with that name is there but is not a recognised world
 		case firstErr == nil:

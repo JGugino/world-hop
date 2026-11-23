@@ -240,6 +240,21 @@ func (s *Server) routes(mux *http.ServeMux) {
 		}
 		var body struct {
 			ID string `json:"id"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		if _, err := s.svc.FindWorld(body.ID); err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		if err := s.deps.License.SetFreeWorld(body.ID); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, s.deps.License.Info())
+	})
+
 	mux.HandleFunc("GET /api/cloud-worlds", func(w http.ResponseWriter, r *http.Request) {
 		cw, err := s.svc.CloudWorlds(r.Context())
 		if err != nil {
@@ -255,15 +270,6 @@ func (s *Server) routes(mux *http.ServeMux) {
 		if !readJSON(w, r, &body) {
 			return
 		}
-		if _, err := s.svc.FindWorld(body.ID); err != nil {
-			writeServiceErr(w, err)
-			return
-		}
-		if err := s.deps.License.SetFreeWorld(body.ID); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
-		writeJSON(w, s.deps.License.Info())
 		res, err := s.svc.DownloadWorld(r.Context(), r.PathValue("id"), body.Saves)
 		if err != nil {
 			writeServiceErr(w, err)
