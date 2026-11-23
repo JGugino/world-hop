@@ -142,6 +142,7 @@ Never commit real IDs. Pushing a `v*` tag runs the `release` workflow, which bui
 - [docs/cloud-setup.md](docs/cloud-setup.md): connecting cloud accounts, registering the Google OAuth app, S3 setup
 - [docs/encryption.md](docs/encryption.md): how encryption works and what it protects
 - [docs/licensing.md](docs/licensing.md): Free vs Pro, license checks, release setup, installers
+- [docs/privacy.md](docs/privacy.md) and [docs/terms.md](docs/terms.md): Privacy Policy and Terms of Service
 
 ## License
 
