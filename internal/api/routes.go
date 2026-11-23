@@ -410,6 +410,10 @@ func writeServiceErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusForbidden, err)
 	case errors.Is(err, license.ErrUnavailable):
 		writeErr(w, http.StatusNotImplemented, err)
+	case errors.Is(err, license.ErrCheckFailed):
+		writeErr(w, http.StatusServiceUnavailable, err)
+	case errors.Is(err, license.ErrInvalid):
+		writeErr(w, http.StatusUnprocessableEntity, err)
 	case errors.Is(err, sync.ErrNoStore), errors.Is(err, ErrProviderUnavailable):
 		writeErr(w, http.StatusNotImplemented, err)
 	case errors.Is(err, sync.ErrWorldOpen), errors.Is(err, sync.ErrDestExists), errors.As(err, &ce):

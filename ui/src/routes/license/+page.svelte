@@ -57,11 +57,10 @@
 	onMount(load);
 </script>
 
-{#if error}<p class="bad">{error}</p>{/if}
-
 {#if !lic}
-	<p class="muted">Loading…</p>
+	{#if error}<p class="bad">{error}</p>{:else}<p class="muted">Loading…</p>{/if}
 {:else if lic.tier === 'pro'}
+	{#if error}<p class="bad">{error}</p>{/if}
 	<section class="card">
 		<h2>WorldHop Pro</h2>
 		<p class="ok">Active. Every world can sync.</p>
@@ -110,23 +109,35 @@
 
 	<section class="card">
 		<h2>Upgrade to Pro</h2>
-		{#if lic.canActivate}
-			{#if lic.purchaseUrl}
-				<p><a href={lic.purchaseUrl} target="_blank" rel="noopener">Get a license key</a>, then paste it here.</p>
-			{/if}
-			<form
-				class="row"
-				onsubmit={(e) => {
-					e.preventDefault();
-					activate();
-				}}>
-				<input type="text" bind:value={key} placeholder="License key" autocomplete="off" spellcheck="false" />
-				<button type="submit" disabled={busy || !key.trim()}>{busy ? 'Checking…' : 'Activate'}</button>
-			</form>
-			<p class="muted small">Activating needs an internet connection. After that, Pro keeps working offline for a while.</p>
-		{:else}
-			<p class="muted">License activation isn’t available in this build.</p>
+		{#if !lic.canActivate}
+			<p class="warn small">
+				This build of WorldHop doesn’t have Pro licensing set up (no Gumroad product ID was compiled
+				in), so a key can’t be checked here. Official releases include it. If you built WorldHop
+				yourself, rebuild with <code>GUMROAD_PRODUCT_ID</code> set.
+			</p>
 		{/if}
+		{#if lic.purchaseUrl}
+			<p><a href={lic.purchaseUrl} target="_blank" rel="noopener">Get a license key</a>, then paste it here.</p>
+		{:else}
+			<p class="muted">Paste the license key from your purchase receipt.</p>
+		{/if}
+		<form
+			class="row"
+			onsubmit={(e) => {
+				e.preventDefault();
+				activate();
+			}}>
+			<input
+				type="text"
+				bind:value={key}
+				placeholder="License key"
+				aria-label="License key"
+				autocomplete="off"
+				spellcheck="false" />
+			<button type="submit" disabled={busy || !key.trim()}>{busy ? 'Checking…' : 'Activate'}</button>
+		</form>
+		{#if error}<p class="bad small" role="alert">{error}</p>{/if}
+		<p class="muted small">Activating needs an internet connection. After that, Pro keeps working offline for a while.</p>
 	</section>
 {/if}
 
