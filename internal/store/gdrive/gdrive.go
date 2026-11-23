@@ -285,6 +285,29 @@ func (s *Store) GetManifest(ctx context.Context, world, name string) ([]byte, er
 	return s.download(ctx, fs[0])
 }
 
+// ListWorlds finds every manifest in the app folder and groups them by world.
+func (s *Store) ListWorlds(ctx context.Context) ([]string, error) {
+	fs, err := s.list(ctx, "appProperties has { key='kind' and value='manifest' }")
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range fs {
+		rest, ok := strings.CutPrefix(f.Name, "worlds/")
+		if !ok {
+			continue
+		}
+		id, name, ok := strings.Cut(rest, "/")
+		if ok && manifest.ValidID(id) && store.ValidManifestName(name) && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 func (s *Store) ListManifests(ctx context.Context, world string) ([]string, error) {
 	if !manifest.ValidID(world) {
 		return nil, fmt.Errorf("gdrive: bad world id %q", world)

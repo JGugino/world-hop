@@ -6,6 +6,10 @@
 		resolveConflict,
 		getSnapshots,
 		restoreSnapshot,
+		getCloudWorlds,
+		getSources,
+		downloadCloudWorld,
+		type CloudWorld,
 		type World,
 		type WorldStatus,
 		type Snapshot,
@@ -48,6 +52,11 @@
 		{ s: 'keep-both', label: 'Keep both', help: 'Copy this version to a new world folder, then use the cloud version.' }
 	];
 
+	let cloud = $state<CloudWorld[]>([]);
+	let cloudError = $state('');
+	let saves = $state<string[]>([]); // saves folders a world can be downloaded into
+	let target = $state(''); // chosen folder
+
 	async function load() {
 		try {
 			worlds = await getWorlds();
@@ -55,7 +64,32 @@
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
 		}
+		try {
+			cloud = await getCloudWorlds();
+			cloudError = '';
+		} catch (e) {
+			cloud = [];
+			cloudError = e instanceof Error ? e.message : String(e);
+		}
+		try {
+			saves = (await getSources()).filter((s) => s.kind === 'saves').map((s) => s.path);
+			if (!saves.includes(target)) target = saves[0] ?? '';
+		} catch {
+			/* the Sources tab reports this */
+		}
 	}
+
+	function size(n: number) {
+		if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+		if (n < 1024 ** 3) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+		return `${(n / 1024 ** 3).toFixed(2)} GB`;
+	}
+
+	const download = (c: CloudWorld) =>
+		run(c.id, async () => {
+			await downloadCloudWorld(c.id, target);
+			notice = `${c.name}: downloaded to ${target}.`;
+		});
 
 	async function run(id: string, fn: () => Promise<unknown>) {
 		busy = id;
@@ -124,13 +158,58 @@
 
 {#if worlds === null}
 	<p class="muted">Loading…</p>
-{:else if worlds.length === 0}
+{:else if worlds.length === 0 && cloud.length === 0}
 	<div class="card">
 		<h2>No worlds yet</h2>
 		<p class="muted">Add a saves folder or a single world on the Sources tab.</p>
 		<a href="/sources">Go to Sources</a>
 	</div>
 {:else}
+	{#if cloud.length > 0}
+		<section class="card">
+			<h2>Cloud worlds</h2>
+			<p class="muted small">
+				These worlds are in your cloud storage but not on this computer. Downloading creates a new
+				folder and never overwrites anything.
+			</p>
+			{#if saves.length === 0}
+				<p class="note">
+					Add a saves folder on the <a href="/sources">Sources</a> tab to choose where to put them.
+				</p>
+			{:else if saves.length > 1}
+				<label class="small">
+					Download into
+					<select bind:value={target}>
+						{#each saves as p}<option value={p}>{p}</option>{/each}
+					</select>
+				</label>
+			{/if}
+			<ul class="cloud">
+				{#each cloud as c (c.id)}
+					<li>
+						<div>
+							<b>{c.name}</b>
+							<span class="muted small">
+								· {size(c.size)} · {c.files} files{#if c.updatedAt} · updated {when(c.updatedAt)}{/if}
+							</span>
+							{#if c.diverged}
+								<p class="note">
+									Two computers changed this world separately. You get the newest version and are
+									asked how to settle it on the next sync.
+								</p>
+							{/if}
+							{#if c.error}<p class="note bad">{c.error}</p>{/if}
+						</div>
+						<button disabled={busy === c.id || !target || !!c.error} onclick={() => download(c)}>
+							{busy === c.id ? 'Downloading…' : 'Download'}
+						</button>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{:else if cloudError}
+		<p class="muted small">Cloud worlds unavailable: {cloudError}</p>
+	{/if}
 	{#each worlds as w (w.id)}
 		<section class="card">
 			<div class="head">
@@ -228,6 +307,10 @@
 	.snaps { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
 	.snaps ul { list-style: none; margin: 0; padding: 0; }
 	.snaps li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; flex-wrap: wrap; }
+	.cloud { list-style: none; margin: 8px 0 0; padding: 0; }
+	.cloud li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+	label.small { display: block; margin-top: 8px; }
+	select { max-width: 100%; }
 	.msg { margin: 12px 0 0; padding: 8px 12px; border-radius: 6px; background: var(--panel); font-size: 0.9rem; }
 	.msg.bad { border-left: 3px solid var(--bad); }
 	.msg.ok { border-left: 3px solid var(--ok); }

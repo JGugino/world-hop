@@ -64,4 +64,7 @@ func Contract(t *testing.T, s store.Store) {
 	if l, _ := s.ListManifests(ctx, "W2"); len(l) != 1 {
 		t.Fatalf("worlds must be isolated: %v", l)
 	}
+	if l, err := s.ListWorlds(ctx); err != nil || len(l) != 2 || l[0] != "W1" || l[1] != "W2" {
+		t.Fatalf("ListWorlds = %v %v, want [W1 W2]", l, err)
+	}
 }

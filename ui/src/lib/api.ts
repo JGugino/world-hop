@@ -25,6 +25,19 @@ export type World = {
 	error?: string;
 };
 
+export type CloudWorld = {
+	id: string;
+	name: string;
+	updatedAt: string | null;
+	size: number;
+	files: number;
+	/** Two computers uploaded without syncing; a conflict will be reported. */
+	diverged: boolean;
+	/** This computer had it before and it was removed, so it is not auto-downloaded. */
+	seen: boolean;
+	error?: string;
+};
+
 export type SourceKind = 'saves' | 'world';
 
 export type Source = {
@@ -95,6 +108,10 @@ export const getSnapshots = (id: string) =>
 	call<Snapshot[]>('GET', `/api/worlds/${encodeURIComponent(id)}/snapshots`);
 export const restoreSnapshot = (id: string, snapshot: string) =>
 	call<void>('POST', `/api/worlds/${encodeURIComponent(id)}/restore`, { snapshot });
+
+export const getCloudWorlds = () => call<CloudWorld[]>('GET', '/api/cloud-worlds');
+export const downloadCloudWorld = (id: string, saves: string) =>
+	call<{ id: string }>('POST', `/api/cloud-worlds/${encodeURIComponent(id)}/download`, { saves });
 
 export const getSources = () => call<Source[]>('GET', '/api/sources');
 export const addSource = (kind: SourceKind, path: string) =>
