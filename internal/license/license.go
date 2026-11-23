@@ -48,7 +48,10 @@ const (
 var ErrWorldLimit = errors.New("the free version syncs 1 world; upgrade to Pro to sync more")
 
 // ErrUnavailable means this build cannot activate keys (no product ID).
-var ErrUnavailable = errors.New("license activation is not available in this build")
+var ErrUnavailable = errors.New("This build of WorldHop has no Pro product ID compiled in, so license keys can't be checked. Use an official release, or build with GUMROAD_PRODUCT_ID set")
+
+// ErrCheckFailed means Gumroad could not be reached (offline, or it is down).
+var ErrCheckFailed = errors.New("couldn't reach the license server. Check your internet connection and try again")
 
 // ErrInvalid means Gumroad rejected the key.
 var ErrInvalid = errors.New("that license key was not accepted. Check it and try again")
@@ -310,11 +313,11 @@ func (m *Manager) verify(ctx context.Context, key string) (ok bool, err error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := m.client.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("could not reach the license server: %w", err)
+		return false, ErrCheckFailed
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-		return false, fmt.Errorf("the license server is unavailable (%d)", resp.StatusCode)
+		return false, ErrCheckFailed
 	}
 	var v verifyResp
 	if err := json.NewDecoder(http.MaxBytesReader(nil, resp.Body, 1<<16)).Decode(&v); err != nil {

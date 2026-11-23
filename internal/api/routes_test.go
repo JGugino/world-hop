@@ -113,10 +113,12 @@ func TestLicenseAPI(t *testing.T) {
 	}
 	if w := do("GET", "/api/license", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"tier":"free"`) {
 		t.Fatalf("get: %d %s", w.Code, w.Body)
+	} else if !strings.Contains(w.Body.String(), `"canActivate":false`) {
+		t.Fatalf("a build without a product ID must say so: %s", w.Body)
 	}
 	// Test builds have no Gumroad product ID, so activation is unavailable.
-	if w := do("POST", "/api/license/activate", `{"key":"x"}`); w.Code != 501 {
-		t.Fatalf("activate: %d %s", w.Code, w.Body)
+	if w := do("POST", "/api/license/activate", `{"key":"x"}`); w.Code != 501 || !strings.Contains(w.Body.String(), "product ID") {
+		t.Fatalf("activate must explain the missing product ID: %d %s", w.Code, w.Body)
 	}
 	if w := do("POST", "/api/license/free-world", `{"id":"nope"}`); w.Code != 404 {
 		t.Fatalf("unknown free world: %d", w.Code)

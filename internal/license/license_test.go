@@ -153,3 +153,18 @@ func TestClockSetBackDoesNotExtendPro(t *testing.T) {
 		t.Fatal("verification in the future should not count")
 	}
 }
+
+func TestActivateOfflineAndInvalidAreDistinct(t *testing.T) {
+	m, _ := newTest(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) })
+	if err := m.Activate(context.Background(), "GOOD-KEY-1234"); !errors.Is(err, ErrCheckFailed) {
+		t.Fatalf("server down: %v", err)
+	}
+	m.endpoint = "http://127.0.0.1:1/" // nothing listening
+	if err := m.Activate(context.Background(), "GOOD-KEY-1234"); !errors.Is(err, ErrCheckFailed) {
+		t.Fatalf("offline: %v", err)
+	}
+	m, _ = newTest(t, func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"success":false}`)) })
+	if err := m.Activate(context.Background(), "BAD"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("bad key: %v", err)
+	}
+}
