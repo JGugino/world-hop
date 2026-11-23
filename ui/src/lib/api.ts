@@ -187,6 +187,8 @@ export const downloadCloudWorld = (id: string, saves: string) =>
 export const getSources = () => call<Source[]>('GET', '/api/sources');
 export const addSource = (kind: SourceKind, path: string) =>
 	call<Source[]>('POST', '/api/sources', { kind, path });
+/** Opens the OS folder dialog on this computer. path is '' if cancelled. */
+export const pickFolder = () => call<{ path: string }>('POST', '/api/pick-folder');
 export const removeSource = (kind: SourceKind, path: string) =>
 	call<Source[]>('POST', '/api/sources/remove', { kind, path });
 

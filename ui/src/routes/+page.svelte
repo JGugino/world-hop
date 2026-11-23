@@ -75,7 +75,7 @@
 			saves = (await getSources()).filter((s) => s.kind === 'saves').map((s) => s.path);
 			if (!saves.includes(target)) target = saves[0] ?? '';
 		} catch {
-			/* the Sources tab reports this */
+			/* the Saves tab reports this */
 		}
 	}
 
@@ -161,8 +161,8 @@
 {:else if worlds.length === 0 && cloud.length === 0}
 	<div class="card">
 		<h2>No worlds yet</h2>
-		<p class="muted">Add a saves folder or a single world on the Sources tab.</p>
-		<a href="/sources">Go to Sources</a>
+		<p class="muted">Add a saves folder or a single world on the Saves tab.</p>
+		<a href="/sources">Go to Saves</a>
 	</div>
 {:else}
 	{#if cloud.length > 0}
@@ -174,7 +174,7 @@
 			</p>
 			{#if saves.length === 0}
 				<p class="note">
-					Add a saves folder on the <a href="/sources">Sources</a> tab to choose where to put them.
+					Add a saves folder on the <a href="/sources">Saves</a> tab to choose where to put them.
 				</p>
 			{:else if saves.length > 1}
 				<label class="small">

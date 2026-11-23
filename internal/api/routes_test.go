@@ -257,3 +257,21 @@ func TestS3Routes(t *testing.T) {
 		t.Fatalf("unwired: %d", w.Code)
 	}
 }
+
+func TestPickFolderEndpoint(t *testing.T) {
+	srv := &Server{Pick: func(context.Context, string) (string, error) { return "/x/saves", nil }, assets: fstest.MapFS{"index.html": {Data: []byte("hi")}}}
+	h := srv.Handler()
+	req := httptest.NewRequest("POST", "/api/pick-folder", nil)
+	req.Host = "127.0.0.1"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"path":"/x/saves"`) {
+		t.Fatalf("got %d %s", w.Code, w.Body.String())
+	}
+	srv.Pick = func(context.Context, string) (string, error) { return "", errNoPicker }
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != 501 {
+		t.Fatalf("got %d", w.Code)
+	}
+}
