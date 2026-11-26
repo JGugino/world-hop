@@ -10,5 +10,4 @@ Keep your Minecraft worlds in sync between all your computers.
 - [Terms of Service](terms.md)
 - [Technical documentation](technical.md)
 - [User guide](user-guide.md)
-- [Feature plan](planning/feature-plan.md) and [original plan](planning/plan.md)
 - [Source code and downloads](https://github.com/JGugino/world-hopper)

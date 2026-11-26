@@ -20,12 +20,10 @@ A system tray app that keeps Minecraft Java worlds in sync between a user's comp
 |---|---|
 | `docs/technical.md` | Technical documentation, written from the code on `main` (through PR #34). Describes what the code does; known gaps are listed in section 11. |
 | `docs/user-guide.md` | End-user guide |
-| `docs/planning/feature-plan.md` | **Newest plan** (final, Nov 23, with a later addition for the styled cloud return page). Feature scope, decisions, build order. |
-| `docs/planning/plan.md` | Original plan. Use only for what feature-plan.md does not cover. |
 | `docs/cloud-setup.md`, `docs/licensing.md`, `docs/encryption.md` | Setup and feature details |
 | `docs/privacy.md`, `docs/terms.md` | Published policies |
 
-**Plan precedence:** `docs/planning/feature-plan.md` wins over `docs/planning/plan.md` wherever they conflict. The technical doc describes the current code; the plans describe intent.
+Planning documents are not kept in the repo. If Josh provides a feature plan, treat it as newer than the original plan, and `docs/technical.md` as what the code does today.
 
 ## Build and test
 
