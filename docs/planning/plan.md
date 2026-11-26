@@ -1,10 +1,6 @@
 # Plan: "WorldHop" (working name) – safe Minecraft world sync between your computers
 
-## Where things are stored
-- This plan file: `/root/.claude/plans/i-m-looking-to-create-typed-ullman.md` (outside the project, in the Claude session's own folder).
-- Copy inside the project: `/home/user/worldhop/PLAN.md` (not committed; no commits exist yet).
-- Code so far: `/home/user/worldhop` (core sync engine, tests passing).
-- Status: build order steps 1-2 done; resume at step 3 (scheduler), then step 4 (Drive/Dropbox).
+> Original plan, kept for context. Some details (such as Dropbox and file paths) are out of date; see `feature-plan.md` and `technical.md`.
 
 ## Context
 You want side income (decent, not a living) from a desktop app built around a problem you have: you play a Minecraft world on your desktop, then want it on your laptop, and today you copy it via Google Drive by hand. You want: pick which worlds to sync in a local web view; closing the view leaves only a tray icon; right-click for Force sync / Open / Exit. Sync must work even if the other computer is off when you close the game. **Latest decision: the user links their own Google Drive or Dropbox account inside the app (no "pick a synced folder").** Name is a placeholder, unchecked for trademarks or domains, and should not contain "Minecraft".
@@ -70,7 +66,7 @@ A small program lives in the system tray on each computer. You connect your Goog
 ## Out of scope for v1
 Bedrock Edition, servers/Realms, mod/config sync, mobile, a hosted "WorldHop Cloud", LAN transfer.
 
-## Files to create (`/home/user/worldhop`)
+## Files to create
 `cmd/worldhop/main.go`; `internal/{worlds,chunker,manifest,store/{localdir,gdrive,dropbox},oauth,sync,tray,license,api}/`; `ui/` (SvelteKit static, TS); `testdata/` (small fixture worlds including a stale `session.lock`); `.github/workflows/build.yml`; `README.md` with a not-affiliated notice; `site/` (privacy policy and terms).
 
 ## Selling it

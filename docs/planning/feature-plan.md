@@ -255,7 +255,7 @@ Show the world's `icon.png` (Minecraft's 64 by 64 world icon, present in most mo
 - Leave the stray "unexpected state" 400 as is.
 - Tests: one per state, checking status, content type, escaping and that the result still reaches the flow.
 
-Mockups and HTML sources: `/mnt/project-files/cloud-return-page/`.
+Mockups and HTML sources are kept outside the repo.
 
 **Effort (rough):** 0.5 thread; fits alongside the Settings page work or the first-run flow. **Tier:** Free.
 
