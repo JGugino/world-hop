@@ -23,7 +23,7 @@ A system tray app that keeps Minecraft Java worlds in sync between a user's comp
 | `docs/cloud-setup.md`, `docs/licensing.md`, `docs/encryption.md` | Setup and feature details |
 | `docs/privacy.md`, `docs/terms.md` | Published policies |
 
-Planning documents are not kept in the repo. If Josh provides a feature plan, treat it as newer than the original plan, and `docs/technical.md` as what the code does today.
+Planning documents are not kept in the repo. `docs/technical.md` describes what the code does today.
 
 ## Build and test
 
@@ -46,7 +46,7 @@ Release builds read a gitignored `.env` and compile IDs in with `-ldflags -X`: `
 - **Update check is notify-only.** It never downloads or installs anything.
 - **Conflict tools are Free**, not Pro.
 - One browser prompt for cloud login; saves can be any number of folders or single worlds.
-- Per feature-plan.md: no hostname stored (anonymous device name, renamable in Settings), Free cloud history 14 days, and mods sync, live presence, auto-merge, pre-launch hook and "sync complete" notifications are dropped.
+- Device names stay anonymous (no hostname stored). Dropped ideas: mods sync, live presence, auto-merge, pre-launch hook, "sync complete" notifications.
 
 ## Working notes
 

@@ -316,7 +316,7 @@ From the code and docs:
 - Unlinking removes the stored tokens locally; the code does not revoke them with the provider.
 - Manual testing on real Windows and macOS with an open world, and with real Google and S3 accounts, is still owed.
 
-Planned but not built (from `planning/feature-plan.md`, which is the newest plan): better snapshot summaries, restore of any snapshot, side-by-side conflict view, "who last saved" warning, tray notifications for conflicts only, snapshot retention and storage usage (including cloud retention: 14 days free, keeping the head and 3 newest versions), Pro history timeline and thumbnails, other launchers plus an editable world id, anonymous device names with a Settings page, and a styled cloud sign-in return page. Dropped: mods sync, live presence, auto-merge, pre-launch hook, "sync complete" notifications.
+Further features are planned but not built; they are not tracked in this repo.
 
 ## 12. Further reading
 
