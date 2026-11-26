@@ -21,7 +21,7 @@ func server(t *testing.T, code int, body string) (*httptest.Server, *int) {
 	return s, &hits
 }
 
-const rel = `{"tag_name":"v0.2.0","html_url":"https://github.com/JGugino/world-hopper/releases/tag/v0.2.0"}`
+const rel = `{"tag_name":"v0.2.0","html_url":"https://github.com/JGugino/world-hop/releases/tag/v0.2.0"}`
 
 func TestNewerReleaseIsReported(t *testing.T) {
 	s, _ := server(t, 200, rel)
@@ -58,8 +58,8 @@ func TestFailuresAreQuiet(t *testing.T) {
 		"rate limited": {403, `{}`},
 		"garbage":      {200, `<html>`},
 		"foreign link": {200, `{"tag_name":"v9.0.0","html_url":"https://evil.example/x"}`},
-		"prerelease":   {200, `{"tag_name":"v9.0.0","prerelease":true,"html_url":"https://github.com/JGugino/world-hopper/x"}`},
-		"bad tag":      {200, `{"tag_name":"nightly","html_url":"https://github.com/JGugino/world-hopper/x"}`},
+		"prerelease":   {200, `{"tag_name":"v9.0.0","prerelease":true,"html_url":"https://github.com/JGugino/world-hop/x"}`},
+		"bad tag":      {200, `{"tag_name":"nightly","html_url":"https://github.com/JGugino/world-hop/x"}`},
 	} {
 		s, _ := server(t, tc.code, tc.body)
 		c := New("v0.1.0", t.TempDir())
@@ -67,6 +67,20 @@ func TestFailuresAreQuiet(t *testing.T) {
 		c.Check(context.Background())
 		if c.Info().Available {
 			t.Errorf("%s: offered an update", name)
+		}
+	}
+}
+
+func TestReleaseLinkPrefixes(t *testing.T) {
+	for url, want := range map[string]bool{
+		"https://github.com/JGugino/world-hop/releases/tag/v1":      true,
+		"https://github.com/JGugino/world-hopper/releases/tag/v1":   true, // saved by an earlier build
+		"https://github.com/JGugino/world-hop-evil/releases/tag/v1": false,
+		"https://github.com/someone-else/world-hop/releases/tag/v1": false,
+		"https://evil.example/JGugino/world-hop/":                   false,
+	} {
+		if got := safeURL(url); got != want {
+			t.Errorf("safeURL(%q) = %v, want %v", url, got, want)
 		}
 	}
 }

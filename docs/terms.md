@@ -20,7 +20,7 @@ storage that **you** own (Google Drive or, with Pro, an S3 bucket). We do not ho
 ## 2. Licensing
 
 - **Source code.** The source is available under the Functional Source License, Version 1.1, MIT
-  Future License ([FSL-1.1-MIT](https://github.com/JGugino/world-hopper/blob/main/LICENSE)). You may
+  Future License ([FSL-1.1-MIT](https://github.com/JGugino/world-hop/blob/main/LICENSE)). You may
   read, build, modify and use it for permitted purposes, but not to offer a competing commercial
   product or service. Each release converts to the MIT license two years after publication. If these
   terms and the LICENSE file conflict about the source code, the LICENSE file controls.
