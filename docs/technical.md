@@ -181,7 +181,7 @@ OAuth client IDs are compiled into release builds (`DefaultGoogleClientID`, `Def
 
 ### 4.2 S3-compatible storage (Pro)
 
-Any S3-compatible service (AWS S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi) over the S3 REST API with SigV4 signing implemented in-repo, no SDK. Settings: endpoint, region (default `us-east-1`), bucket, optional key prefix, path-style addressing, access key and secret key. Non-secret settings live in `s3.json`; the secret key is in the keychain. The Cloud page can test the connection. The provider is checked against the license on every store call, so a lapsed license stops S3 even if the store is already built.
+Any S3-compatible service (AWS S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi) over the S3 REST API with SigV4 signing implemented in-repo, no SDK. Settings: endpoint, region (default `us-east-1`), bucket, optional key prefix, path-style addressing, access key and secret key. Non-secret settings live in `s3.json`; the access key and secret key are stored together in the keychain. The Cloud page can test the connection. The provider is checked against the license on every store call, so a lapsed license stops S3 even if the store is already built.
 
 ### 4.3 Local folder store
 
@@ -229,7 +229,7 @@ Pro is a one-time Gumroad purchase. Gumroad emails a license key; the user paste
 
 ## 7. Update check
 
-`internal/update` asks GitHub for the latest published (non-draft, non-prerelease) release of `JGugino/world-hopper` at most once per 24 hours and remembers the result in `update.json`. It is **notify-only**: it never downloads or installs anything. A newer version adds the tray item "Update available: vX", and the UI can open the release page. Links are accepted only if they start with `https://github.com/JGugino/world-hopper/`. Every failure is silent. A build with version `dev` never checks.
+`internal/update` asks GitHub for the latest published (non-draft, non-prerelease) release of `JGugino/world-hop` at most once per 24 hours and remembers the result in `update.json`. It is **notify-only**: it never downloads or installs anything. A newer version adds the tray item "Update available: vX", and the UI can open the release page. Links are accepted only if they start with `https://github.com/JGugino/world-hop/` (the old `world-hopper` name is also accepted, for links saved by earlier builds). Every failure is silent. A build with version `dev` never checks.
 
 ## 8. State and data locations
 
@@ -250,7 +250,7 @@ State directory: `os.UserConfigDir()/worldhop` (override with `-state`). On Wind
 | `cache/<id>.json` | Scan stat cache |
 | `snapshots/<id>/` | Local snapshots |
 
-In the OS keychain (service `worldhop`): OAuth tokens, the S3 secret key and, if remembered, the derived encryption key. Next to each world, temporary `.worldhopper-staging-*` and `.worldhopper-old-*` folders exist only during a swap.
+In the OS keychain (service `worldhop`): OAuth tokens, the S3 access and secret keys and, if remembered, the derived encryption key. Next to each world, temporary `.worldhopper-staging-*` and `.worldhopper-old-*` folders exist only during a swap.
 
 ## 9. Build and release
 

@@ -23,14 +23,21 @@ import (
 const (
 	// LatestURL is the GitHub API endpoint for the newest published
 	// (non-draft, non-prerelease) release.
-	LatestURL = "https://api.github.com/repos/JGugino/world-hopper/releases/latest"
-	// pagePrefixURL is the only place a release link may point; anything else in
-	// the response is ignored so the app never offers an arbitrary link.
-	pagePrefix = "https://github.com/JGugino/world-hopper/"
+	LatestURL = "https://api.github.com/repos/JGugino/world-hop/releases/latest"
 	// Interval is how often a check is due.
 	Interval  = 24 * time.Hour
 	stateFile = "update.json"
 )
+
+// pagePrefixes are the only places a release link may point; anything else in
+// the response is ignored so the app never offers an arbitrary link. The repo
+// was renamed from world-hopper to world-hop. GitHub reports the current name in
+// html_url, but a link saved by an earlier build may still carry the old one, so
+// both are accepted.
+var pagePrefixes = []string{
+	"https://github.com/JGugino/world-hop/",
+	"https://github.com/JGugino/world-hopper/",
+}
 
 // Info is what the UI and tray show.
 type Info struct {
@@ -170,7 +177,14 @@ func (c *Checker) fetch(ctx context.Context) (tag, page string, err error) {
 	return rel.Tag, rel.HTMLURL, nil
 }
 
-func safeURL(u string) bool { return strings.HasPrefix(u, pagePrefix) }
+func safeURL(u string) bool {
+	for _, p := range pagePrefixes {
+		if strings.HasPrefix(u, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // parse reads "v1.2.3" or "1.2.3" (anything after the patch number, such as
 // "-rc1", is ignored). Non-version strings like "dev" return false.

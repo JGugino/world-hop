@@ -70,7 +70,7 @@ including pricing and how license checks work.
 
 ## Getting started
 
-1. Download the installer for your system from the [Releases](https://github.com/JGugino/world-hopper/releases) page:
+1. Download the installer for your system from the [Releases](https://github.com/JGugino/world-hop/releases) page:
    - **Windows:** unzip `WorldHop-<version>-windows-amd64.zip` and run `worldhop.exe`.
    - **macOS:** open `WorldHop-<version>.dmg` and drag `WorldHop.app` out. It is not code-signed yet, so on first launch right-click it and choose **Open**. It lives in the menu bar.
    - **Linux:** install the `.deb`, or unpack the `.tar.gz`. The tray needs a desktop with AppIndicator support.

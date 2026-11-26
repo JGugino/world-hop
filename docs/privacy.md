@@ -71,7 +71,7 @@ WorldHop contacts only these services, and only for the purposes shown:
   WorldHop product ID to Gumroad to verify it, on activation and about once a week afterwards.
   Gumroad, like any web service, also sees your IP address. Gumroad's own
   [privacy policy](https://gumroad.com/privacy) applies to that and to your purchase.
-- **GitHub** (`api.github.com`): *(applies once the update check ships)* about once a day WorldHop
+- **GitHub** (`api.github.com`): about once a day WorldHop
   asks GitHub for the latest WorldHop release to tell you if an update exists. No personal data is
   sent beyond what any web request includes, such as your IP address. Nothing is downloaded or
   installed automatically.
