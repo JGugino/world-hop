@@ -224,6 +224,20 @@ export type Encryption = {
 	remember: boolean;
 	/** The cloud store already has a key (set up on another computer); null = unknown. */
 	keyInStore: boolean | null;
+	/** Another computer changed the passphrase: enter the new one. */
+	keyChanged?: boolean;
+	/** A passphrase change running here, or its result until dismissed. */
+	rekey?: Rekey;
+	error?: string;
+};
+
+export type Rekey = {
+	state: 'running' | 'done' | 'failed' | 'cancelled';
+	phase?: 'preparing' | 'copying' | 'finishing';
+	/** Manifests and packs copied so far, and in all. */
+	done: number;
+	total: number;
+	worlds: number;
 	error?: string;
 };
 
@@ -238,6 +252,17 @@ export const unlockEncryption = (passphrase: string, remember: boolean) =>
 	call<Encryption>('POST', '/api/encryption/unlock', { passphrase, remember });
 export const lockEncryption = () => call<Encryption>('POST', '/api/encryption/lock');
 export const disableEncryption = () => call<Encryption>('POST', '/api/encryption/disable');
+export const changePassphrase = (b: {
+	current: string;
+	passphrase: string;
+	confirm: string;
+	acknowledged: boolean;
+	remember: boolean;
+}) => call<Encryption>('POST', '/api/encryption/change-passphrase', b);
+export const cancelChangePassphrase = () =>
+	call<Encryption>('POST', '/api/encryption/change-passphrase/cancel');
+export const dismissChangePassphrase = () =>
+	call<Encryption>('POST', '/api/encryption/change-passphrase/dismiss');
 
 export type UpdateInfo = {
 	available: boolean;

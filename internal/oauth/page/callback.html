@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>{{.Title}} - WorldHop</title>
+<link rel="icon" href="/callback/assets/icon.svg" type="image/svg+xml">
+{{if eq .State "working"}}<noscript><meta http-equiv="refresh" content="2"></noscript>{{end}}
+<style>
+@font-face { font-family: 'Press Start 2P'; src: url('/callback/assets/font.woff2') format('woff2'); font-display: swap; }
+:root {
+	--bg: #1a1d20; --panel: #262b30; --panel-hi: #3a4148; --panel-lo: #181b1e;
+	--text: #eef0f2; --muted: #a9b0b8; --accent: #5cc641; --ok: #7be060; --warn: #ffd23f; --bad: #ff8f80;
+	--font-pixel: 'Press Start 2P', 'Courier New', monospace;
+	--font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: var(--font-body); line-height: 1.45; }
+.grass { height: 10px; background: #4a9a35; border-bottom: 2px solid #000; box-shadow: inset 0 -4px 0 #2f6b21;
+	background-image: linear-gradient(90deg, #58b042 0 4px, transparent 4px 16px, #357a26 16px 20px, transparent 20px 44px); background-size: 48px 4px; }
+header { background: #14171a; border-bottom: 2px solid #000; }
+.brand { display: flex; align-items: center; gap: 12px; max-width: 560px; margin: 0 auto; padding: 14px 16px; }
+.brand img { image-rendering: pixelated; flex: none; }
+.brand b { font: normal 1.05rem var(--font-pixel); color: #fff; }
+.brand b::first-letter { color: var(--accent); }
+main { flex: 1; width: 100%; max-width: 560px; margin: 0 auto; padding: 28px 16px; }
+.card { background: var(--panel); border: 2px solid #000; box-shadow: inset 2px 2px 0 var(--panel-hi), inset -2px -2px 0 var(--panel-lo); padding: 22px 24px 24px; border-left: 6px solid #6b7078; }
+.card[data-state='success'] { border-left-color: var(--accent); }
+.card[data-state='error'] { border-left-color: var(--bad); }
+.card[data-state='error'][data-kind='denied'], .card[data-state='error'][data-kind='cancelled'], .card[data-state='error'][data-kind='stale'], .card[data-state='error'][data-kind='expired'] { border-left-color: var(--warn); }
+.top { display: flex; align-items: center; gap: 16px; }
+.tile { flex: none; width: 64px; height: 64px; display: grid; place-items: center; border: 2px solid #000; background: #4a5057; box-shadow: inset 2px 2px 0 #7b828a, inset -2px -2px 0 #2c3035; }
+[data-state='success'] .tile { background: #3d9a2b; box-shadow: inset 2px 2px 0 #7ddc62, inset -2px -2px 0 #24621a; }
+[data-state='error'] .tile { background: #a63a2e; box-shadow: inset 2px 2px 0 #e48a7a, inset -2px -2px 0 #66201a; }
+[data-state='error'][data-kind='denied'] .tile, [data-state='error'][data-kind='cancelled'] .tile, [data-state='error'][data-kind='stale'] .tile, [data-state='error'][data-kind='expired'] .tile { background: #b88a12; box-shadow: inset 2px 2px 0 #f0c64a, inset -2px -2px 0 #6e5208; }
+.tile svg { width: 40px; height: 40px; shape-rendering: crispEdges; fill: #fff; display: none; }
+[data-state='working'] .i-work, [data-state='success'] .i-ok, [data-state='error'] .i-bad { display: block; }
+[data-state='error'][data-kind='denied'] .i-bad, [data-state='error'][data-kind='cancelled'] .i-bad, [data-state='error'][data-kind='stale'] .i-bad, [data-state='error'][data-kind='expired'] .i-bad { display: none; }
+[data-state='error'][data-kind='denied'] .i-warn, [data-state='error'][data-kind='cancelled'] .i-warn, [data-state='error'][data-kind='stale'] .i-warn, [data-state='error'][data-kind='expired'] .i-warn { display: block; }
+.i-work rect { animation: blink 1.2s steps(1) infinite; opacity: .25; }
+.i-work rect:nth-child(2) { animation-delay: .4s; } .i-work rect:nth-child(3) { animation-delay: .8s; }
+@keyframes blink { 0%, 33% { opacity: 1; } 34%, 100% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .i-work rect { animation: none; opacity: 1; } }
+h1 { margin: 0; font: normal .8rem/1.6 var(--font-pixel); overflow-wrap: anywhere; }
+p { margin: 14px 0 0; }
+.hint { color: var(--muted); }
+.detail { margin-top: 16px; padding: 8px 12px; background: #111315; border: 2px solid #000; box-shadow: inset 2px 2px 0 #000, inset -2px -2px 0 #3c434a; color: var(--muted); font: .82rem/1.45 ui-monospace, Menlo, Consolas, monospace; word-break: break-word; }
+.detail b { color: var(--text); font: inherit; }
+[hidden] { display: none !important; }
+footer { color: #7d858d; font-size: .8rem; max-width: 560px; margin: 0 auto; padding: 0 16px 24px; }
+</style>
+</head>
+<body>
+<div class="grass" aria-hidden="true"></div>
+<header><div class="brand"><img src="/callback/assets/icon.svg" alt="" width="44" height="44"><b>WorldHop</b></div></header>
+<main>
+<section class="card" id="card" data-state="{{.State}}" data-kind="{{.Kind}}" role="status" aria-live="polite">
+	<div class="top">
+		<div class="tile" aria-hidden="true">
+			<svg class="i-work" viewBox="0 0 9 3"><rect x="0" y="0" width="3" height="3"/><rect x="3" y="0" width="3" height="3"/><rect x="6" y="0" width="3" height="3"/></svg>
+			<svg class="i-ok" viewBox="0 0 9 9"><path d="M1 4h1v1H1zM2 5h1v1H2zM3 6h1v1H3zM4 5h1v1H4zM5 4h1v1H5zM6 3h1v1H6zM7 2h1v1H7z"/></svg>
+			<svg class="i-bad" viewBox="0 0 9 9"><path d="M2 2h1v1H2zM3 3h1v1H3zM4 4h1v1H4zM5 5h1v1H5zM6 6h1v1H6zM6 2h1v1H6zM5 3h1v1H5zM3 5h1v1H3zM2 6h1v1H2z"/></svg>
+			<svg class="i-warn" viewBox="0 0 9 9"><path d="M4 1h1v5H4zM4 7h1v1H4z"/></svg>
+		</div>
+		<h1 id="title">{{.Title}}</h1>
+	</div>
+	<p id="message">{{.Message}}</p>
+	<p class="hint" id="hint" {{if not .Hint}}hidden{{end}}>{{.Hint}}</p>
+	<div class="detail" id="detail" {{if not .Detail}}hidden{{end}}><b>Details:</b> <span id="detailtext">{{.Detail}}</span></div>
+</section>
+</main>
+<footer>WorldHop is not an official Minecraft product and is not affiliated with Mojang or Microsoft.</footer>
+<script nonce="{{.Nonce}}">
+(function () {
+	var card = document.getElementById('card');
+	var q = location.search;
+	var misses = 0;
+	function set(id, text) {
+		var el = document.getElementById(id);
+		el.textContent = text || '';
+		el.hidden = !text;
+	}
+	function show(o) {
+		card.dataset.state = o.state;
+		card.dataset.kind = o.kind || '';
+		document.getElementById('title').textContent = o.title;
+		document.getElementById('message').textContent = o.message;
+		set('hint', o.hint);
+		var d = document.getElementById('detail');
+		document.getElementById('detailtext').textContent = o.detail || '';
+		d.hidden = !o.detail;
+		document.title = o.title + ' - WorldHop';
+	}
+	function lost() {
+		show({
+			state: 'error', kind: 'lost', title: 'Lost contact with WorldHop',
+			message: 'This page could not reach WorldHop any more. It may have been closed or restarted.',
+			hint: 'Open WorldHop and check the Cloud account tab to see whether the account connected.'
+		});
+	}
+	function poll() {
+		fetch('/callback/result' + q, { cache: 'no-store' })
+			.then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+			.then(function (o) {
+				misses = 0;
+				show(o);
+				if (o.state === 'working') setTimeout(poll, 400);
+			})
+			.catch(function () {
+				misses++;
+				if (misses >= 3) lost(); else setTimeout(poll, 800);
+			});
+	}
+	if (card.dataset.state === 'working') poll();
+})();
+</script>
+</body>
+</html>

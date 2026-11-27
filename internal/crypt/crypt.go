@@ -62,8 +62,14 @@ const (
 	keyWorld       = ReservedPrefix + "key"
 	indexWorld     = ReservedPrefix + "index"
 	worldPrefix    = ReservedPrefix + "w-"
-	keyManifest    = "manifest-000000000001-key.json"
+	keyDevice      = "key" // the "device" in a key header's manifest name
 )
+
+// headerName is the manifest name of key header generation gen. Generation 1
+// is the first key; every passphrase change writes the next generation, and
+// the newest one is the key in force. The store never overwrites, so older
+// headers stay as they were.
+func headerName(gen int64) string { return manifest.FileName(gen, keyDevice) }
 
 // IsReserved reports whether a world id belongs to the encryption layer.
 func IsReserved(id string) bool { return strings.HasPrefix(id, ReservedPrefix) }
@@ -90,6 +96,17 @@ type Header struct {
 	Salt    string `json:"salt"`
 	Params
 	Check string `json:"check"`
+
+	gen int64 // generation, from the manifest name; 1 when new
+}
+
+// Generation is how many keys this store has had: 1 for the first, 2 after the
+// first passphrase change, and so on.
+func (h *Header) Generation() int64 {
+	if h.gen < 1 {
+		return 1
+	}
+	return h.gen
 }
 
 // Key is the unlocked master key.
@@ -130,6 +147,16 @@ func derive(pass string, salt []byte, p Params) *Key {
 
 // NewHeader creates a fresh header and the key for pass.
 func NewHeader(pass string, p Params) (*Header, *Key, error) {
+	return newHeader(pass, p, 1)
+}
+
+// NewHeaderAfter creates the header that replaces prev: a new salt, so a new
+// key, one generation on.
+func NewHeaderAfter(prev *Header, pass string, p Params) (*Header, *Key, error) {
+	return newHeader(pass, p, prev.Generation()+1)
+}
+
+func newHeader(pass string, p Params, gen int64) (*Header, *Key, error) {
 	if len([]rune(pass)) < MinPassphrase {
 		return nil, nil, ErrWeakPassphrase
 	}
@@ -141,7 +168,7 @@ func NewHeader(pass string, p Params) (*Header, *Key, error) {
 		return nil, nil, err
 	}
 	k := derive(pass, salt, p)
-	return &Header{Version: 1, KDF: "argon2id", Salt: base64.StdEncoding.EncodeToString(salt), Params: p, Check: k.check()}, k, nil
+	return &Header{Version: 1, KDF: "argon2id", Salt: base64.StdEncoding.EncodeToString(salt), Params: p, Check: k.check(), gen: gen}, k, nil
 }
 
 func (h *Header) validate() ([]byte, error) {
@@ -189,9 +216,23 @@ func (h *Header) ID() string {
 
 // ---- header in the store ----
 
-// ReadHeader loads the key header, or ErrNoKey.
+// ReadHeader loads the newest key header, or ErrNoKey.
 func ReadHeader(ctx context.Context, st store.Store) (*Header, error) {
-	b, err := st.GetManifest(ctx, keyWorld, keyManifest)
+	names, err := st.ListManifests(ctx, keyWorld)
+	if err != nil {
+		return nil, err
+	}
+	var best string
+	var bestGen int64
+	for _, n := range names {
+		if gen, dev, ok := manifest.ParseName(n); ok && dev == keyDevice && gen > bestGen {
+			best, bestGen = n, gen
+		}
+	}
+	if best == "" {
+		return nil, ErrNoKey
+	}
+	b, err := st.GetManifest(ctx, keyWorld, best)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, ErrNoKey
 	}
@@ -205,17 +246,19 @@ func ReadHeader(ctx context.Context, st store.Store) (*Header, error) {
 	if _, err := h.validate(); err != nil {
 		return nil, err
 	}
+	h.gen = bestGen
 	return &h, nil
 }
 
-// WriteHeader stores the header. It never overwrites: if another computer got
-// there first, it returns store.ErrExists and the caller should read theirs.
+// WriteHeader stores the header under its generation. It never overwrites: if
+// another computer got there first, it returns store.ErrExists and the caller
+// should read theirs.
 func WriteHeader(ctx context.Context, st store.Store, h *Header) error {
 	b, err := json.Marshal(h)
 	if err != nil {
 		return err
 	}
-	return st.PutManifest(ctx, keyWorld, keyManifest, b)
+	return st.PutManifest(ctx, keyWorld, headerName(h.Generation()), b)
 }
 
 // ---- the encrypting store ----
@@ -225,14 +268,25 @@ type Store struct {
 	Inner store.Store
 	data  []byte // data key
 	names []byte // naming key
+	index string // world id of this key's index of worlds
 }
 
 var _ store.Store = (*Store)(nil)
 
 // New wraps inner with key k. The key must already be verified against the
 // store's header.
-func New(inner store.Store, k *Key) *Store {
-	return &Store{Inner: inner, data: k.sub("data"), names: k.sub("names")}
+func New(inner store.Store, k *Key) *Store { return NewForGeneration(inner, k, 1) }
+
+// NewForGeneration is New for the key of key header generation gen. Each
+// generation keeps its own index of worlds: entries sealed with one key can't
+// be read with another, so a shared index would stop either from listing.
+// Everything else is told apart by names derived from the key itself.
+func NewForGeneration(inner store.Store, k *Key, gen int64) *Store {
+	index := indexWorld
+	if gen > 1 {
+		index = fmt.Sprintf("%s-g%d", indexWorld, gen)
+	}
+	return &Store{Inner: inner, data: k.sub("data"), names: k.sub("names"), index: index}
 }
 
 func (s *Store) hmacHex(parts ...string) string {
@@ -314,7 +368,7 @@ func (s *Store) PutManifest(ctx context.Context, worldID, name string, data []by
 	if err != nil {
 		return err
 	}
-	if err := s.Inner.PutManifest(ctx, indexWorld, s.indexName(worldID), blob); err != nil && !errors.Is(err, store.ErrExists) {
+	if err := s.Inner.PutManifest(ctx, s.index, s.indexName(worldID), blob); err != nil && !errors.Is(err, store.ErrExists) {
 		return err
 	}
 	blob, err = s.seal(data, "manifest", worldID, name)
@@ -343,13 +397,13 @@ func (s *Store) ListManifests(ctx context.Context, worldID string) ([]string, er
 }
 
 func (s *Store) ListWorlds(ctx context.Context) ([]string, error) {
-	names, err := s.Inner.ListManifests(ctx, indexWorld)
+	names, err := s.Inner.ListManifests(ctx, s.index)
 	if err != nil {
 		return nil, err
 	}
 	var out []string
 	for _, n := range names {
-		blob, err := s.Inner.GetManifest(ctx, indexWorld, n)
+		blob, err := s.Inner.GetManifest(ctx, s.index, n)
 		if err != nil {
 			return nil, err
 		}

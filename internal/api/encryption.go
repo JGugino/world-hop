@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -53,6 +54,45 @@ func (s *Server) encryptionRoutes(mux *http.ServeMux) {
 			writeServiceErr(w, err)
 			return
 		}
+		writeJSON(w, s.deps.Encryption.Info(r.Context()))
+	})
+	mux.HandleFunc("POST /api/encryption/change-passphrase", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Encryption == nil {
+			writeErr(w, http.StatusNotImplemented, errNoEncryption)
+			return
+		}
+		var b struct {
+			Current      string `json:"current"`
+			Passphrase   string `json:"passphrase"`
+			Confirm      string `json:"confirm"`
+			Acknowledged bool   `json:"acknowledged"`
+			Remember     bool   `json:"remember"`
+		}
+		if !readJSON(w, r, &b) {
+			return
+		}
+		if err := s.deps.Encryption.StartChangePassphrase(r.Context(), b.Current, b.Passphrase, b.Confirm, b.Acknowledged, b.Remember); err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(s.deps.Encryption.Info(r.Context()))
+	})
+	mux.HandleFunc("POST /api/encryption/change-passphrase/cancel", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Encryption == nil {
+			writeErr(w, http.StatusNotImplemented, errNoEncryption)
+			return
+		}
+		s.deps.Encryption.CancelChangePassphrase()
+		writeJSON(w, s.deps.Encryption.Info(r.Context()))
+	})
+	mux.HandleFunc("POST /api/encryption/change-passphrase/dismiss", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Encryption == nil {
+			writeErr(w, http.StatusNotImplemented, errNoEncryption)
+			return
+		}
+		s.deps.Encryption.DismissRekey()
 		writeJSON(w, s.deps.Encryption.Info(r.Context()))
 	})
 	for _, name := range []string{"lock", "disable"} {

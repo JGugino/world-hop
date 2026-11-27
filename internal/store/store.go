@@ -14,10 +14,15 @@ var (
 	// Encryption errors live here, not in package crypt, so callers that only
 	// explain them (the sync engine) need not import crypt. crypt re-exports them.
 	ErrEncryptionLocked = errors.New("encryption is on but locked: enter your passphrase under Encryption")
-	ErrWrongPassphrase  = errors.New("wrong passphrase")
-	ErrTampered         = errors.New("encrypted data failed its integrity check")
-	ErrNoKey            = errors.New("this store has no encryption key yet")
-	ErrBadHeader        = errors.New("unreadable encryption key header")
+	// ErrPassphraseChanged: another computer changed the encryption passphrase, so
+	// the key this one holds no longer matches the store.
+	ErrPassphraseChanged = errors.New("the encryption passphrase was changed on another computer: enter the new passphrase under Encryption")
+	// ErrRekeying: this computer is re-encrypting everything under a new passphrase.
+	ErrRekeying        = errors.New("the encryption passphrase is being changed: syncing resumes when it finishes")
+	ErrWrongPassphrase = errors.New("wrong passphrase")
+	ErrTampered        = errors.New("encrypted data failed its integrity check")
+	ErrNoKey           = errors.New("this store has no encryption key yet")
+	ErrBadHeader       = errors.New("unreadable encryption key header")
 	// ErrExists is returned by PutManifest when the name is taken.
 	ErrExists = errors.New("store: already exists")
 )

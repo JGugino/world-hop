@@ -242,7 +242,7 @@ func (m *Manager) StartLink(id string) (string, error) {
 	if err := m.saveChoice(id); err != nil {
 		return "", err
 	}
-	flow := &oauth.Flow{Config: p.oauth, HTTP: m.HTTP}
+	flow := &oauth.Flow{Name: p.name, Config: p.oauth, HTTP: m.HTTP}
 	pend, err := flow.Start()
 	if err != nil {
 		return "", err
@@ -262,7 +262,8 @@ func (m *Manager) finish(id string, pend *oauth.Pending) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.pending != pend {
-		return // superseded or cancelled
+		pend.Cancel() // superseded or cancelled: tell the browser page
+		return
 	}
 	m.pending = nil
 	if err != nil {
@@ -271,8 +272,10 @@ func (m *Manager) finish(id string, pend *oauth.Pending) {
 	}
 	if err := m.tokens.Set(id, tok); err != nil {
 		m.lastErr = "could not save credentials to the system keychain: " + err.Error()
+		pend.Saved(err)
 		return
 	}
+	pend.Saved(nil)
 	m.resetProvider(id)
 	m.changed()
 }

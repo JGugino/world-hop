@@ -170,6 +170,8 @@ Optionally tick **Remember on this computer** to store the key in your system ke
 
 **If you lose your passphrase, your encrypted worlds cannot be recovered. Nobody, including us, can reset it.**
 
+To change it, open the **Encryption** tab and choose **Change passphrase**. Enter the current passphrase and the new one twice. WorldHop then re-encrypts all your worlds with the new passphrase and shows its progress; syncing on this computer pauses until it finishes, and stopping it midway changes nothing. Try not to sync from your other computers meanwhile. Afterwards, each other computer asks for the **new** passphrase. The previous encrypted copy stays in your cloud account and can still be opened with the old passphrase; WorldHop cannot delete it, so remove it with your cloud provider if the old passphrase was exposed.
+
 Turning encryption on uploads encrypted copies beside your existing ones. WorldHop cannot delete the old unencrypted copies, so delete them yourself in your cloud account if you want them gone (Google Drive: Settings, Manage apps, WorldHop, Delete hidden app data).
 
 ## 10. Updates
@@ -184,10 +186,12 @@ When a newer version is available, WorldHop shows a notice with a link to the do
 | A world is not listed | Check that its folder, or its parent saves folder, is added on the **Saves** tab. It must contain a `level.dat` file. |
 | "Waiting for Minecraft to close" | Close the world in Minecraft. WorldHop syncs it automatically. |
 | Google sign-in did nothing | Make sure your browser did not block the page, then click **Connect** again. |
+| The browser page after sign-in says something went wrong | It names the problem and what to do (declined, a permission left unticked, no internet, keychain locked, and so on). Fix that, go back to WorldHop and click **Connect** again. Nothing is connected until the page says so. |
 | "No cloud account" message | Connect Google Drive or S3 on the **Cloud account** tab. |
 | Only one world syncs | You are on the free version. Pick the free world, or upgrade, on the **License** tab. |
 | Pro stopped working | Open **License**. If you were offline for a long time, connect to the internet so WorldHop can re-check. |
-| "Encryption is on but locked" | Enter your passphrase on the **Encryption** tab. |
+| "Encryption is on but locked" | Enter your passphrase on the **Encryption** tab. If it says the passphrase was changed on another computer, enter the new one. |
+| "Your encryption passphrase is being changed" | A passphrase change is running on this computer. Syncing resumes when it finishes; watch the **Encryption** tab. |
 | Two computers show a conflict | Choose a resolution (section 8). Nothing is overwritten until you do. |
 | A world looks wrong after a sync | Close Minecraft and restore an earlier snapshot (section 8). |
 

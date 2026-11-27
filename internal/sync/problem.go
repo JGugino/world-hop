@@ -108,6 +108,16 @@ func explain(err error) Problem {
 			Title:  "Your cloud sign-in expired",
 			Action: "Reconnect your account on the Cloud account tab. Your worlds are safe.",
 			Fix:    "/cloud"}
+	case errors.Is(err, store.ErrRekeying):
+		return Problem{Kind: ProblemBusy, Level: LevelInfo,
+			Title:  "Your encryption passphrase is being changed",
+			Action: "Syncing resumes by itself when the change finishes. Watch its progress on the Encryption tab.",
+			Fix:    "/encryption"}
+	case errors.Is(err, store.ErrPassphraseChanged):
+		return Problem{Kind: ProblemLocked, Level: LevelWarn,
+			Title:  "The encryption passphrase was changed on another computer",
+			Action: "Enter the new passphrase on the Encryption tab to resume syncing.",
+			Fix:    "/encryption"}
 	case errors.Is(err, store.ErrEncryptionLocked):
 		return Problem{Kind: ProblemLocked, Level: LevelWarn,
 			Title:  "Encryption is locked",

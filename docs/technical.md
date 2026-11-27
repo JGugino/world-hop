@@ -89,6 +89,7 @@ By default (`!webview` build tag) the UI opens in the default browser: `rundll32
 | `GET /api/providers`, `POST /api/providers/{id}/link` and `/unlink` | Cloud accounts |
 | `GET/PUT /api/s3`, `POST /api/s3/test` | S3 settings (Pro) |
 | `GET /api/encryption`, `POST /api/encryption/enable`, `/unlock`, `/lock`, `/disable` | Encryption |
+| `POST /api/encryption/change-passphrase`, `/change-passphrase/cancel`, `/change-passphrase/dismiss` | Start (202), stop, or clear the result of a passphrase change; progress is `rekey` in `GET /api/encryption` |
 | `GET /api/license`, `POST /api/license/activate`, `/deactivate`, `/free-world` | Licensing |
 
 ## 3. Sync model
@@ -175,7 +176,7 @@ Force Sync (tray or UI) runs a pass immediately. The `Runner` runs one pass at a
 
 Uses only the `drive.appdata` scope, so WorldHop sees its own hidden app folder and nothing else in the user's Drive. Drive has no real paths, so objects are flat files named `packs/<hash>` and `worlds/<id>/<manifest>`, with world ids and kinds stored in `appProperties` for listing. Uploads over 5 MiB use the resumable protocol.
 
-Sign-in is the installed-app OAuth flow with PKCE on a loopback port: the app opens one browser consent page, receives the redirect on `127.0.0.1`, and exchanges the code. Tokens are stored in the OS keychain (Keychain, Credential Manager, Secret Service), never in plain files. A revoked or expired grant moves the account to `needs-reconnect`.
+Sign-in is the installed-app OAuth flow with PKCE on a loopback port: the app opens one browser consent page, receives the redirect on `127.0.0.1`, and exchanges the code. Tokens are stored in the OS keychain (Keychain, Credential Manager, Secret Service), never in plain files. The browser tab it lands on is a styled page served by the same loopback listener (embedded in `internal/oauth/page`, same look as the web view). It first shows "Finishing sign-in", then polls `/callback/result` and switches to the real outcome once the code is exchanged **and** the credentials are saved (`Pending.Saved`). Outcomes with their own wording: connected, declined, a permission left unticked, provider unavailable, blocked by an administrator, build set up wrongly, other provider error, incomplete redirect, stale link, expired code, network failure, timeout, refused token request, keychain failure and cancelled from inside WorldHop. The page also says so if it loses contact with the app. The listener stays up for up to 30 seconds after the outcome so the page can read it. A revoked or expired grant moves the account to `needs-reconnect`.
 
 OAuth client IDs are compiled into release builds (`DefaultGoogleClientID`, `DefaultGoogleClientSecret`, set by `-ldflags`). For development, `cloud.json` in the state dir (keys `googleClientId`, `googleClientSecret`) and the environment variables `WORLDHOP_GOOGLE_CLIENT_ID` and `WORLDHOP_GOOGLE_CLIENT_SECRET` override them, environment last. Google lists desktop client secrets as not truly confidential, but they are still never committed.
 
@@ -200,6 +201,10 @@ Not implemented. An earlier build had a Dropbox store; the product decision is G
 - Pack names are HMACs of the plaintext hash, so identical data still deduplicates without revealing its hash. World ids are hashed (`_worldhop-w-...`); an encrypted index lets another computer list worlds.
 - A **key header** (salt, KDF cost, key check) is stored in the cloud account under reserved `_worldhop-*` ids. It holds no secret. The key check reports a wrong passphrase immediately.
 - Still visible to the provider: roughly how much data there is and when it changed, manifest file names (generation and random device id), and the number of worlds, packs and manifests.
+
+**Changing the passphrase:** every key comes from the passphrase and a salt, so a new passphrase means a new key and, because names are derived from the key, a new layout beside the old one. `Manager.StartChangePassphrase` (`internal/crypt/rekey.go`) verifies the current passphrase, then re-encrypts in the background: every world's manifests, and the packs of each world's newest versions, are read through the old key and written through the new one (packs first, then manifests), looping until a pass finds nothing new so versions another computer pushes meanwhile are carried over. **Writing the next key header generation is the commit point** (`manifest-<generation>-key.json`; the newest generation is the key in force, and older headers are left as they were). Until then no other computer sees any of it, so a cancelled, failed or interrupted change leaves only unused data. An unfinished attempt is remembered in `rekey.json` (the salt and the generation it replaces, no secret) so a retry with the same new passphrase reuses the salt and finds the data already copied. Manifest names are the same in both layouts, so each computer's "last synced" record stays valid and nothing looks like a conflict. Each key generation has its own index of worlds (`_worldhop-index`, then `_worldhop-index-g2`, ...), because entries sealed with one key cannot be opened with another. While a change runs, store calls from this computer return `ErrRekeying` (shown as an informational "being changed" problem), and Lock, Disable and a second change are refused. The change is not a Pro feature, and works from a locked state, since it only maintains data that is already encrypted.
+
+Other computers find out by comparing the newest key header's generation with the one they unlocked: an unlocked computer checks at most once a minute, and a locked or restarted one compares the header with the `keyId` saved in `encryption.json`. Either way it drops its key (also from the keychain) and reports `ErrPassphraseChanged`, and the Encryption tab asks for the new passphrase. The previous encrypted copy cannot be removed by WorldHop (the store has no delete); it stays readable with the old passphrase until the user deletes it with the provider. Packs of versions older than each world's newest are not carried over, so that history exists only in the old copy.
 
 **Second computer:** enable encryption and enter the same passphrase. The key header is found in the account, the passphrase is verified, and worlds appear. Creating a new key needs the passphrase twice and an explicit acknowledgement that a lost passphrase cannot be recovered.
 
@@ -307,7 +312,7 @@ Unit and integration tests live beside each package. `internal/store/storetest` 
 
 From the code and docs:
 
-- Changing the encryption passphrase (re-encrypting everything) is not implemented.
+- A passphrase change copies the data to a new layout; the old encrypted copy stays in the cloud (no delete) and older versions' packs are not carried over. Another computer that syncs while a change runs can push into the old layout after the last catch-up pass; that version stays in the old copy, and that computer sees a local change to upload (or a conflict to resolve) after it unlocks.
 - A provider can still delete data or roll a world back to an older manifest. Encryption detects modification, not rollback or deletion.
 - No cloud cleanup: old manifests and packs are never deleted (the store has no delete), so cloud usage only grows. The app cannot remove a plaintext copy after encryption is enabled.
 - Snapshots are local only (newest 5 per world).
