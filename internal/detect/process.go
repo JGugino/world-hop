@@ -1,3 +1,7 @@
+// process.go: finding a running Minecraft. Lists processes with the platform's own
+// command (ps, or PowerShell on Windows) and recognises a Java process running
+// Minecraft, a mod loader or a server by its command line.
+
 package detect
 
 import (
@@ -10,6 +14,8 @@ import (
 	"strings"
 )
 
+// javaExe matches a command whose program is java or javaw (any path, with or
+// without .exe).
 var javaExe = regexp.MustCompile(`(?i)(^|[\\/ "])javaw?(\.exe)?"?$`)
 
 // Substrings (lower case) that identify a Minecraft client or server JVM:
@@ -58,6 +64,7 @@ type ExecLister struct {
 // NewExecLister returns a lister for the current platform.
 func NewExecLister() *ExecLister { return &ExecLister{GOOS: runtime.GOOS} }
 
+// run runs a command, through the test hook if set or os/exec otherwise.
 func (l *ExecLister) run(name string, args ...string) ([]byte, error) {
 	if l.Run != nil {
 		return l.Run(name, args...)
@@ -65,6 +72,8 @@ func (l *ExecLister) run(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).Output()
 }
 
+// winScript is the PowerShell command that lists Java processes with their command
+// lines, one "pid<TAB>commandline" per line.
 const winScript = `Get-CimInstance Win32_Process -Filter "Name like 'java%'" | ForEach-Object { "$($_.ProcessId)` + "`t" + `$($_.CommandLine)" }`
 
 // List implements ProcessLister.

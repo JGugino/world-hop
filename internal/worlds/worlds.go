@@ -1,4 +1,14 @@
 // Package worlds finds Minecraft Java worlds on disk.
+//
+// A world is any folder that contains a level.dat file. Where to look comes from
+// sources (sources.go): saves folders the user added (every world inside, including
+// ones created later) and single world folders. Launchers keep saves in different
+// places, so DefaultRoots knows the usual layouts (vanilla, Prism, MultiMC,
+// CurseForge, Modrinth) on Windows, macOS and Linux.
+//
+// The world's id (IDFromName) is its folder name made safe for the store. Computers
+// match worlds across machines by this id, which is why the folder name has to be
+// the same everywhere.
 package worlds
 
 import (
@@ -23,6 +33,7 @@ type Root struct {
 	Path     string
 }
 
+// badID matches the characters not allowed in a world id; each run becomes a dash.
 var badID = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 // IDFromName turns a folder name into a store-safe world id. Devices that

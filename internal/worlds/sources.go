@@ -1,3 +1,6 @@
+// sources.go: what the user asked to keep synced (saves folders and single worlds) and
+// how that list is turned into concrete worlds.
+
 package worlds
 
 import (

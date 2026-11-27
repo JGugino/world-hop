@@ -1,5 +1,7 @@
 //go:build windows
 
+// lock_windows.go: probing Minecraft's world lock on Windows.
+
 package detect
 
 import (
@@ -12,6 +14,9 @@ import (
 // read of a locked file fails with a lock violation.
 type PlatformLockProber struct{}
 
+// Held reports whether another process holds the lock on the file at path. Java's
+// lock is mandatory on Windows, so merely opening or reading the file fails while the
+// game holds it; either failure counts as held. A missing file is not held.
 func (PlatformLockProber) Held(path string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
