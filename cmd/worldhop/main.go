@@ -1,3 +1,8 @@
+// main.go: the WorldHop program. It parses flags, builds every piece (store,
+// encryption, sync engine, scheduler, web server, tray) and connects them. See the
+// comment on main for the order. docs/technical.md section 2 describes the
+// architecture.
+
 package main
 
 import (
@@ -33,13 +38,31 @@ var version = "dev"
 // listFlag collects a repeatable flag.
 type listFlag []string
 
-func (l *listFlag) String() string     { return strings.Join(*l, ",") }
+// String returns the collected values joined by commas (flag.Value).
+func (l *listFlag) String() string { return strings.Join(*l, ",") }
+
+// Set adds one more value each time the flag is given (flag.Value).
 func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
 
 // idleTimeout is how long the web server lingers with no requests. The UI polls
 // every few seconds while open, so only a closed/abandoned view lets it lapse.
 const idleTimeout = 3 * time.Minute
 
+// main wires the program together, in this order:
+//
+//  1. Read flags and pick the per-device state directory.
+//  2. Build the store stack: the local folder (-store) or the cloud account manager,
+//     wrapped in the encryption manager.
+//  3. Create the sync engine on top and attach the hooks (license gate, "is the world
+//     open", encryption scope).
+//  4. Load the saved sync sources, seeding them on first run.
+//  5. Create the Runner and Scheduler (automatic syncing), the license re-check and
+//     the daily update check.
+//  6. Prepare the on-demand web server (Lazy), then run the tray. The web server does
+//     not exist yet: Open Web View starts it.
+//
+// With -no-tray it serves the web view immediately and never starts the tray. Each
+// piece is documented in its own package; this function only connects them.
 func main() {
 	addr := flag.String("addr", "127.0.0.1:0", "listen address (must be loopback)")
 	headless := flag.Bool("no-tray", false, "serve the API/UI only, without a tray icon")

@@ -1,3 +1,5 @@
+// encryption.go: the Encryption tab's endpoints.
+
 package api
 
 import (
@@ -10,6 +12,12 @@ import (
 
 var errNoEncryption = errors.New("encryption is not available in this build")
 
+// encryptionRoutes registers the Encryption tab's endpoints: state, enable, unlock,
+// lock, disable, change passphrase (start, cancel, dismiss) and the two choices when
+// the
+// cloud's key header looks rolled back. Each calls the crypt.Manager; the heavy work of
+// a passphrase change runs in the background and the page polls GET /api/encryption for
+// progress.
 func (s *Server) encryptionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/encryption", func(w http.ResponseWriter, r *http.Request) {
 		if s.deps.Encryption == nil {

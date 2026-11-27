@@ -67,6 +67,7 @@ func New() *Detector {
 	}
 }
 
+// now is the detector's clock (time.Now unless a test sets Now).
 func (d *Detector) now() time.Time {
 	if d.Now != nil {
 		return d.Now()
@@ -97,7 +98,12 @@ func (d *Detector) GameRunning() (bool, error) {
 
 // WorldOpen reports whether the world at worldPath is open in Minecraft.
 // When it cannot tell it errs on the side of "open", because syncing an open
-// world risks corrupting it.
+// world risks corrupting it. The steps: no session.lock means never opened or
+// closed; otherwise ask the OS whether another process holds the lock; if the lock
+// is free but was written within the last few seconds and a game is running, treat it
+// as open (the moment between creating and locking the file); if the OS cannot say,
+// fall back to "is a Minecraft process running at all", and if even that fails,
+// assume open.
 func (d *Detector) WorldOpen(worldPath string) bool {
 	lock := filepath.Join(worldPath, LockFile)
 	st, err := os.Stat(lock)

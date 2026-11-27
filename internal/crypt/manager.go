@@ -1,3 +1,9 @@
+// manager.go: the Manager is the store the sync engine actually talks to. It wraps the
+// cloud store and adds encryption that can be switched on, locked and unlocked at
+// runtime, remembering the key in the OS keychain if the user asks. It also keeps the
+// settings file (encryption.json) and notices when another computer changed the
+// passphrase or the cloud's key header looks rolled back.
+
 package crypt
 
 import (
@@ -45,6 +51,7 @@ type Keychain interface {
 // KeyringKeys keeps keys in the OS keychain.
 type KeyringKeys struct{ Service string }
 
+// Get returns the remembered key for a header id, or (nil, nil) if there is none.
 func (k KeyringKeys) Get(id string) ([]byte, error) {
 	s, err := keyring.Get(k.Service, "encryption-"+id)
 	if errors.Is(err, keyring.ErrNotFound) {
@@ -56,10 +63,12 @@ func (k KeyringKeys) Get(id string) ([]byte, error) {
 	return hex.DecodeString(s)
 }
 
+// Set remembers a key (hex-encoded) in the OS keychain under a header id.
 func (k KeyringKeys) Set(id string, key []byte) error {
 	return keyring.Set(k.Service, "encryption-"+id, hex.EncodeToString(key))
 }
 
+// Delete forgets a remembered key. Deleting one that isn't there is not an error.
 func (k KeyringKeys) Delete(id string) error {
 	err := keyring.Delete(k.Service, "encryption-"+id)
 	if errors.Is(err, keyring.ErrNotFound) {
@@ -68,6 +77,9 @@ func (k KeyringKeys) Delete(id string) error {
 	return err
 }
 
+// settings is what is saved in encryption.json: whether encryption is on, whether
+// the key is remembered in the keychain, and the key header this computer last used
+// (public data, no secret). The passphrase is never saved, and neither is the key.
 type settings struct {
 	Enabled  bool `json:"enabled"`
 	Remember bool `json:"remember"`
@@ -102,6 +114,10 @@ type Manager struct {
 	// Now is the clock (time.Now if nil).
 	Now func() time.Time
 
+	// The rest is internal state. mu guards all of it. cfg is the saved settings
+	// (encryption.json at path). hdr and key are the key header and unlocked key in
+	// force, and enc is the encrypting store built from them; all three are nil while
+	// locked. checked is when the header was last compared with the cloud's.
 	path    string
 	mu      sync.Mutex
 	cfg     settings
@@ -110,13 +126,19 @@ type Manager struct {
 	enc     *Store
 	checked time.Time // when the key header was last compared with the store's
 
+	// rekey, rekeyCancel and rekeyDone belong to the background passphrase change (see
+	// rekey.go): its progress, how to stop it, and a channel closed when it ends.
 	rekey       *Rekey
 	rekeyCancel context.CancelFunc
 	rekeyDone   chan struct{}
 
+	// rollback is set when the cloud's key header was found older than the newest one
+	// this computer has used. It stays set (stopping all store calls) until the user
+	// chooses what to do; see keyrollback.go.
 	rollback bool // the cloud's key header is behind this computer's
 }
 
+// now is the Manager's clock (time.Now unless a test sets Now).
 func (m *Manager) now() time.Time {
 	if m.Now != nil {
 		return m.Now()
@@ -140,6 +162,8 @@ func NewManager(inner store.Store, dir string, keys Keychain, pro func() bool) (
 	return m, nil
 }
 
+// save writes encryption.json atomically (temp file and rename) with owner-only
+// permissions. The caller holds m.mu.
 func (m *Manager) save() error {
 	b, _ := json.Marshal(m.cfg)
 	if err := os.MkdirAll(filepath.Dir(m.path), 0o755); err != nil {
@@ -377,6 +401,9 @@ func (m *Manager) Unlock(ctx context.Context, pass string, remember bool) error 
 	return m.set(h, k, remember)
 }
 
+// set makes the given header and key the ones in force: it remembers the key in
+// the keychain (or forgets it, per remember), saves the settings and builds the
+// encrypting store. The caller supplies a key already verified against the header.
 func (m *Manager) set(h *Header, k *Key, remember bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -397,6 +424,7 @@ func (m *Manager) set(h *Header, k *Key, remember bool) error {
 	return nil
 }
 
+// isRekeying reports whether a passphrase change is running.
 func (m *Manager) isRekeying() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -437,6 +465,11 @@ func (m *Manager) Disable() error {
 
 // ---- store.Store ----
 
+// PutPack stores a pack. Like GetPack, PutManifest, GetManifest, ListManifests and
+// ListWorlds below, it implements store.Store by asking current for the store to
+// use: the plain inner store while encryption is off, the encrypting one once it is
+// on, or an error (locked, rolled back, being re-encrypted) that stops the sync
+// without ever falling back to unencrypted data.
 func (m *Manager) PutPack(ctx context.Context, name string, data []byte) error {
 	s, err := m.current(ctx)
 	if err != nil {
@@ -445,6 +478,7 @@ func (m *Manager) PutPack(ctx context.Context, name string, data []byte) error {
 	return s.PutPack(ctx, name, data)
 }
 
+// GetPack fetches a pack through the current store (see PutPack).
 func (m *Manager) GetPack(ctx context.Context, name string) ([]byte, error) {
 	s, err := m.current(ctx)
 	if err != nil {
@@ -453,6 +487,7 @@ func (m *Manager) GetPack(ctx context.Context, name string) ([]byte, error) {
 	return s.GetPack(ctx, name)
 }
 
+// PutManifest stores a manifest through the current store (see PutPack).
 func (m *Manager) PutManifest(ctx context.Context, worldID, name string, data []byte) error {
 	s, err := m.current(ctx)
 	if err != nil {
@@ -461,6 +496,7 @@ func (m *Manager) PutManifest(ctx context.Context, worldID, name string, data []
 	return s.PutManifest(ctx, worldID, name, data)
 }
 
+// GetManifest fetches a manifest through the current store (see PutPack).
 func (m *Manager) GetManifest(ctx context.Context, worldID, name string) ([]byte, error) {
 	s, err := m.current(ctx)
 	if err != nil {
@@ -469,6 +505,7 @@ func (m *Manager) GetManifest(ctx context.Context, worldID, name string) ([]byte
 	return s.GetManifest(ctx, worldID, name)
 }
 
+// ListManifests lists a world's manifest names through the current store (see PutPack).
 func (m *Manager) ListManifests(ctx context.Context, worldID string) ([]string, error) {
 	s, err := m.current(ctx)
 	if err != nil {
@@ -490,6 +527,8 @@ func (m *Manager) MissingPacks(ctx context.Context, names []string) ([]string, e
 	return chk.MissingPacks(ctx, names)
 }
 
+// ListWorlds lists the worlds in the store, hiding the encryption layer's own
+// bookkeeping worlds (key header and index) so they never appear as worlds.
 func (m *Manager) ListWorlds(ctx context.Context) ([]string, error) {
 	s, err := m.current(ctx)
 	if err != nil {

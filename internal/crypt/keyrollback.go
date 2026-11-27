@@ -1,3 +1,6 @@
+// keyrollback.go: what happens when the cloud shows an older key header than this
+// computer has used, or none.
+
 package crypt
 
 import (

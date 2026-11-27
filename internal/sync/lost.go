@@ -1,3 +1,7 @@
+// lost.go: noticing that the cloud lost or rolled back data, and the two actions the
+// user can choose from. The design rule: WorldHop warns and stops, and never repairs by
+// itself.
+
 package sync
 
 import (
@@ -51,6 +55,8 @@ type LostError struct {
 	Packs int
 }
 
+// Error implements error with a plain description of what is missing. The wording
+// is for logs and API errors; the UI builds its own text from the fields.
 func (e *LostError) Error() string {
 	switch e.Kind {
 	case LostWorld:
@@ -164,11 +170,16 @@ func maxGeneration(names []string) int64 {
 
 // ---- data the cloud lost (found when a push or pull needs it) ----
 
+// lostData remembers, in memory only, which worlds were found to have data missing
+// from the cloud when a push or pull needed it. It lets the Worlds tab show the
+// warning until the user resolves it. It is lost on restart and found again the next
+// time something is pushed or pulled.
 type lostData struct {
 	mu stdsync.Mutex
 	m  map[string]*LostError
 }
 
+// set records that a world's data was found missing.
 func (l *lostData) set(id string, e *LostError) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -178,12 +189,14 @@ func (l *lostData) set(id string, e *LostError) {
 	l.m[id] = e
 }
 
+// get returns the recorded loss for a world, or nil.
 func (l *lostData) get(id string) *LostError {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.m[id]
 }
 
+// clear forgets a world's recorded loss (after a successful push, pull or resolution).
 func (l *lostData) clear(id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

@@ -1,3 +1,7 @@
+// routes.go: the settings and world endpoints, and the small interfaces (SourceStore,
+// Providers, Licenser, Encrypter, Updater) that keep this package independent of the
+// packages that implement them.
+
 package api
 
 import (
@@ -77,6 +81,8 @@ type Licenser interface {
 
 var _ Licenser = (*license.Manager)(nil)
 
+// providers returns the cloud account provider in use, or the stub (used with the
+// -store folder mode, where there is no account) when none was given.
 func (s *Server) providers() Providers {
 	if s.deps.Providers == nil {
 		return StubProviders{}
@@ -84,6 +90,11 @@ func (s *Server) providers() Providers {
 	return s.deps.Providers
 }
 
+// errBody is the JSON shape of an error response. Error is always set. For errors
+// WorldHop can explain it also carries a kind, what to do about it, the UI page where
+// to
+// do it, and the raw detail, so the page can show a helpful message instead of a stack
+// of technical text.
 type errBody struct {
 	Error string `json:"error"`
 	// Action and Fix are set for errors WorldHop can explain: what to do, and
@@ -94,12 +105,15 @@ type errBody struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// writeErr writes a plain error response with the given status code.
 func writeErr(w http.ResponseWriter, code int, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(errBody{Error: err.Error()})
 }
 
+// readJSON decodes a small JSON request body into v (limited to 64 KiB). On a bad
+// body it writes a 400 and returns false, so the handler just returns.
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
@@ -116,6 +130,8 @@ type SourceInfo struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// sourceInfos lists the configured sources with how many worlds each currently
+// resolves to, and any problem (missing folder, not a world).
 func (s *Server) sourceInfos() []SourceInfo {
 	out := []SourceInfo{}
 	if s.deps.Sources == nil {
@@ -139,6 +155,8 @@ type SnapshotDTO struct {
 	CreatedAt *time.Time `json:"createdAt"`
 }
 
+// snapshotDTO converts a snapshot to its API shape, splitting the id back into the
+// time it was taken and the reason (pull, conflict, pre-restore, ...).
 func snapshotDTO(si sync.SnapshotInfo) SnapshotDTO {
 	d := SnapshotDTO{ID: si.ID}
 	// ids look like 20060102T150405.000000Z-reason
@@ -151,6 +169,11 @@ func snapshotDTO(si sync.SnapshotInfo) SnapshotDTO {
 	return d
 }
 
+// routes registers the settings and world endpoints: update info, sources, worlds
+// (status, sync, resolve, lost data, snapshots, restore, cloud-only worlds and
+// download),
+// cloud accounts, S3 settings and licensing, then the Encryption routes. The interfaces
+// above are the only things these handlers know about the rest of the program.
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/update", func(w http.ResponseWriter, r *http.Request) {
 		if s.deps.Updates == nil {
@@ -410,6 +433,13 @@ func (s *Server) routes(mux *http.ServeMux) {
 	})
 }
 
+// writeServiceErr turns an error from the sync, license or encryption layers into
+// an HTTP status: not found, bad request, locked, payment required, conflict (a
+// conflict
+// to resolve, an open world, lost cloud data), and so on. Anything it does not
+// recognise
+// is explained by sync.Explain and returned as a 500 with a plain-language title and
+// the next step, so the UI never has to show a raw error.
 func writeServiceErr(w http.ResponseWriter, err error) {
 	var ce *sync.ConflictError
 	var le *sync.LostError

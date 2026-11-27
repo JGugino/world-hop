@@ -1,5 +1,7 @@
 //go:build windows
 
+// icon_windows.go: the tray icon on Windows, which needs ICO data.
+
 package tray
 
 import "github.com/JGugino/world-hopper/assets"

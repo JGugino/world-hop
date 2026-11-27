@@ -12,6 +12,21 @@
 // data still lands under the same name without exposing its plaintext hash) and
 // a key-check key. The salt and KDF cost live in a small key header stored next
 // to the data, so a second computer only needs the passphrase.
+//
+// How the files divide the work:
+//
+//   - crypt.go: the cryptography and the encrypting Store (Header, Key, Store).
+//     Pure: it has no settings, keychain or UI knowledge.
+//   - manager.go: the Manager, the store the engine actually uses. It switches
+//     encryption on and off at runtime, holds the unlocked key, talks to the OS
+//     keychain, and notices when another computer changes the passphrase.
+//   - rekey.go: changing the passphrase, which means re-encrypting everything into
+//     a new layout and committing by writing the next key header generation.
+//   - keyrollback.go: noticing and handling a cloud that shows an older key header
+//     than this computer has used (or none).
+//
+// See docs/encryption.md for the user-facing description and docs/technical.md
+// section 5 for the design.
 package crypt
 
 import (
@@ -84,6 +99,9 @@ type Params struct {
 // DefaultParams: about 64 MiB and a fraction of a second on a laptop.
 var DefaultParams = Params{Time: 3, MemKiB: 64 << 10, Threads: 4}
 
+// valid reports whether the cost is within sane bounds. A key header from the
+// cloud is untrusted input: without this, a tampered header could ask for gigabytes
+// of memory or hours of hashing.
 func (p Params) valid() bool {
 	return p.Time >= 1 && p.Time <= 10 && p.MemKiB >= 8 && p.MemKiB <= 1<<20 && p.Threads >= 1 && p.Threads <= 16
 }
@@ -125,6 +143,9 @@ func KeyFromBytes(b []byte) (*Key, error) {
 // Bytes returns the raw master key. Treat it like the passphrase itself.
 func (k *Key) Bytes() []byte { return append([]byte(nil), k.master[:]...) }
 
+// sub derives a purpose-specific 32-byte key from the master key with HKDF
+// ("data", "names", "check"). Separate keys mean a weakness in how one is used can't
+// affect the others.
 func (k *Key) sub(info string) []byte {
 	b, err := hkdf.Key(sha256.New, k.master[:], nil, "worldhop "+info+" v1", 32)
 	if err != nil {
@@ -133,12 +154,18 @@ func (k *Key) sub(info string) []byte {
 	return b
 }
 
+// check returns the key-check value stored in the header. Only the right
+// passphrase reproduces it, which is how a wrong passphrase is reported at once
+// instead of failing in the middle of a sync. It is an HMAC of a constant under a
+// derived key, so it reveals nothing about the passphrase.
 func (k *Key) check() string {
 	m := hmac.New(sha256.New, k.sub("check"))
 	m.Write([]byte("key check"))
 	return hex.EncodeToString(m.Sum(nil))
 }
 
+// derive stretches a passphrase and salt into a master key with Argon2id at the
+// given cost.
 func derive(pass string, salt []byte, p Params) *Key {
 	k := &Key{}
 	copy(k.master[:], argon2.IDKey([]byte(pass), salt, p.Time, p.MemKiB, p.Threads, 32))
@@ -156,6 +183,8 @@ func NewHeaderAfter(prev *Header, pass string, p Params) (*Header, *Key, error) 
 	return newHeader(pass, p, prev.Generation()+1)
 }
 
+// newHeader makes a header (fresh random salt) and its key for pass, at key header
+// generation gen. Used by NewHeader (generation 1) and NewHeaderAfter (a change).
 func newHeader(pass string, p Params, gen int64) (*Header, *Key, error) {
 	if len([]rune(pass)) < MinPassphrase {
 		return nil, nil, ErrWeakPassphrase
@@ -171,6 +200,8 @@ func newHeader(pass string, p Params, gen int64) (*Header, *Key, error) {
 	return &Header{Version: 1, KDF: "argon2id", Salt: base64.StdEncoding.EncodeToString(salt), Params: p, Check: k.check(), gen: gen}, k, nil
 }
 
+// validate checks the header is a version and KDF this code understands, the cost
+// is sane, and the salt decodes to a plausible length. It returns the salt.
 func (h *Header) validate() ([]byte, error) {
 	if h.Version != 1 || h.KDF != "argon2id" || !h.Params.valid() {
 		return nil, ErrBadHeader
@@ -200,6 +231,8 @@ func (h *Header) Verify(k *Key) error {
 	return h.verify(k)
 }
 
+// verify reports ErrWrongPassphrase unless k reproduces the header's key check
+// (compared in constant time).
 func (h *Header) verify(k *Key) error {
 	if !hmac.Equal([]byte(k.check()), []byte(h.Check)) {
 		return ErrWrongPassphrase
@@ -289,18 +322,33 @@ func NewForGeneration(inner store.Store, k *Key, gen int64) *Store {
 	return &Store{Inner: inner, data: k.sub("data"), names: k.sub("names"), index: index}
 }
 
+// hmacHex is HMAC-SHA256 under the naming key over the parts, as hex. It is how
+// names the provider sees (packs, worlds, index entries) are derived from the real
+// ones without revealing them, while staying the same every time so deduplication
+// still works.
 func (s *Store) hmacHex(parts ...string) string {
 	m := hmac.New(sha256.New, s.names)
 	m.Write([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(m.Sum(nil))
 }
 
+// packName is the name a pack is stored under: an HMAC of its plaintext hash.
 func (s *Store) packName(name string) string { return s.hmacHex("pack", name) }
-func (s *Store) worldID(id string) string    { return worldPrefix + s.hmacHex("world", id) }
+
+// worldID is the id a world is stored under: a fixed prefix plus an HMAC of the
+// real id.
+func (s *Store) worldID(id string) string { return worldPrefix + s.hmacHex("world", id) }
+
+// indexName is the manifest name of a world's entry in the index of worlds.
 func (s *Store) indexName(id string) string {
 	return "manifest-000000000001-" + s.hmacHex("index", id)[:32] + ".json"
 }
 
+// seal encrypts and authenticates plain with XChaCha20-Poly1305 and a random
+// nonce, prefixed with the format marker. The aad parts (for example the pack
+// name, or world id plus manifest name) are authenticated but not stored, so a
+// sealed blob only opens under the exact name it was sealed for. That is what stops
+// a provider swapping blobs between names or moving a manifest to another world.
 func (s *Store) seal(plain []byte, aad ...string) ([]byte, error) {
 	a, err := chacha20poly1305.NewX(s.data)
 	if err != nil {
@@ -316,6 +364,8 @@ func (s *Store) seal(plain []byte, aad ...string) ([]byte, error) {
 	return a.Seal(out, nonce, plain, []byte(strings.Join(aad, "\x00"))), nil
 }
 
+// open is the reverse of seal. Any failure (wrong key, modified data, wrong name,
+// missing marker) is reported as ErrTampered.
 func (s *Store) open(blob []byte, aad ...string) ([]byte, error) {
 	a, err := chacha20poly1305.NewX(s.data)
 	if err != nil {
@@ -332,6 +382,8 @@ func (s *Store) open(blob []byte, aad ...string) ([]byte, error) {
 	return plain, nil
 }
 
+// PutPack seals the pack under its plaintext name and stores it under the keyed
+// name. Idempotent, like the Store contract requires.
 func (s *Store) PutPack(ctx context.Context, name string, data []byte) error {
 	if !store.ValidPackName(name) {
 		return fmt.Errorf("crypt: bad pack name")
@@ -343,6 +395,7 @@ func (s *Store) PutPack(ctx context.Context, name string, data []byte) error {
 	return s.Inner.PutPack(ctx, s.packName(name), blob)
 }
 
+// GetPack fetches and opens a pack; ErrTampered if it was modified.
 func (s *Store) GetPack(ctx context.Context, name string) ([]byte, error) {
 	if !store.ValidPackName(name) {
 		return nil, fmt.Errorf("crypt: bad pack name")
@@ -381,10 +434,16 @@ func (s *Store) MissingPacks(ctx context.Context, names []string) ([]string, err
 	return out, nil
 }
 
+// indexEntry is the plaintext of one entry of the index of worlds: the real world
+// id, sealed before it is stored, so the provider sees only hashed ids.
 type indexEntry struct {
 	WorldID string `json:"worldId"`
 }
 
+// PutManifest stores a manifest sealed under its world id and name. It also
+// records the world in this key generation's index first (so ListWorlds can recover
+// the real id on another computer); an entry that already exists is fine, so that
+// step is idempotent.
 func (s *Store) PutManifest(ctx context.Context, worldID, name string, data []byte) error {
 	if !manifest.ValidID(worldID) || !store.ValidManifestName(name) {
 		return fmt.Errorf("crypt: bad world id or manifest name")
@@ -405,6 +464,8 @@ func (s *Store) PutManifest(ctx context.Context, worldID, name string, data []by
 	return s.Inner.PutManifest(ctx, s.worldID(worldID), name, blob)
 }
 
+// GetManifest fetches and opens a manifest; ErrTampered if it was modified or
+// moved from another world or name.
 func (s *Store) GetManifest(ctx context.Context, worldID, name string) ([]byte, error) {
 	if !manifest.ValidID(worldID) || !store.ValidManifestName(name) {
 		return nil, fmt.Errorf("crypt: bad world id or manifest name")
@@ -416,6 +477,9 @@ func (s *Store) GetManifest(ctx context.Context, worldID, name string) ([]byte, 
 	return s.open(blob, "manifest", worldID, name)
 }
 
+// ListManifests lists the manifest names of a world. The names are not encrypted
+// (they hold a generation number and a random device id), so this needs no
+// decryption.
 func (s *Store) ListManifests(ctx context.Context, worldID string) ([]string, error) {
 	if !manifest.ValidID(worldID) {
 		return nil, fmt.Errorf("crypt: bad world id")
@@ -423,6 +487,9 @@ func (s *Store) ListManifests(ctx context.Context, worldID string) ([]string, er
 	return s.Inner.ListManifests(ctx, s.worldID(worldID))
 }
 
+// ListWorlds reads this key generation's index, opens each entry and checks it
+// (valid id, and the entry's name matches the id), returning the real world ids
+// that have at least one manifest. A bad entry is ErrTampered.
 func (s *Store) ListWorlds(ctx context.Context) ([]string, error) {
 	names, err := s.Inner.ListManifests(ctx, s.index)
 	if err != nil {

@@ -1,3 +1,11 @@
+<!--
+The Worlds tab (the home page). Lists every world on this computer with how it
+compares with the cloud (up to date, changes to upload, newer in the cloud, conflict,
+or cloud data missing) and the actions that apply: sync, settle a conflict, choose
+what to do about lost cloud data, and browse or restore snapshots. Below it, worlds
+that are only in the cloud can be downloaded. The page reloads itself every 10
+seconds and right after a sync finishes.
+-->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
@@ -22,12 +30,15 @@
 	let worlds = $state<World[] | null>(null);
 	let error = $state('');
 	let notice = $state('');
+	// busy holds the id of the world (or cloud world) whose action is running, so its
+	// buttons are disabled.
 	let busy = $state<string | null>(null); // world id with an action running
 
 	let openSnaps = $state<string | null>(null);
 	let snaps = $state<Snapshot[]>([]);
 	let confirmRestore = $state<string | null>(null);
 
+	// labels and tone: the text and colour of each world's status badge.
 	const labels: Record<WorldStatus, string> = {
 		synced: 'Up to date',
 		'local-ahead': 'Changes to upload',
@@ -49,6 +60,8 @@
 		unknown: 'muted'
 	};
 
+	// The four ways to settle a conflict, with the help text shown beside the buttons.
+	// Nothing picks one automatically.
 	const choices: { s: Strategy; label: string; help: string }[] = [
 		{ s: 'keep-local', label: 'Keep local', help: 'Use this computer’s version and upload it.' },
 		{ s: 'keep-remote', label: 'Keep remote', help: 'Use the cloud version. A snapshot of this one is saved first.' },
@@ -61,6 +74,9 @@
 	let saves = $state<string[]>([]); // saves folders a world can be downloaded into
 	let target = $state(''); // chosen folder
 
+	// load refreshes everything on the page: the worlds with their status, the cloud-only
+	// worlds, and the saves folders a download can go into. Each part has its own error so
+	// one failing doesn't blank the rest.
 	async function load() {
 		try {
 			worlds = await getWorlds();
@@ -83,18 +99,22 @@
 		}
 	}
 
+	// size formats a byte count for display.
 	function size(n: number) {
 		if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
 		if (n < 1024 ** 3) return `${(n / 1024 / 1024).toFixed(1)} MB`;
 		return `${(n / 1024 ** 3).toFixed(2)} GB`;
 	}
 
+	// download fetches a cloud-only world into the chosen saves folder.
 	const download = (c: CloudWorld) =>
 		run(c.id, async () => {
 			await downloadCloudWorld(c.id, target);
 			notice = `${c.name}: downloaded to ${target}.`;
 		});
 
+	// run wraps any action on a world: marks it busy, clears old messages, shows an error
+	// if it fails, then reloads the page data and the shared sync status.
 	async function run(id: string, fn: () => Promise<unknown>) {
 		busy = id;
 		error = notice = '';
@@ -108,6 +128,7 @@
 		status.refresh();
 	}
 
+	// sync syncs one world now.
 	const sync = (w: World) => run(w.id, () => syncWorld(w.id));
 
 	// Data the cloud lost: nothing happens until the person picks, and confirms.
@@ -122,6 +143,7 @@
 			help: 'Upload this computer’s world as a new version, rebuilding whatever the cloud lost.'
 		}
 	};
+	// doLost carries out the confirmed choice about lost cloud data.
 	const doLost = (w: World, a: LostAction) =>
 		run(w.id, async () => {
 			await resolveLost(w.id, a);
@@ -132,12 +154,14 @@
 					: `${w.name}: now going by what the cloud holds.`;
 		});
 
+	// resolve settles a conflict with the chosen strategy.
 	const resolve = (w: World, s: Strategy) =>
 		run(w.id, async () => {
 			const r = await resolveConflict(w.id, s);
 			notice = `${w.name}: resolved with “${r.used}”.` + (r.copy ? ` Your version was kept at ${r.copy}.` : '');
 		});
 
+	// toggleSnaps shows or hides a world's snapshots (loading them when shown).
 	async function toggleSnaps(w: World) {
 		confirmRestore = null;
 		if (openSnaps === w.id) {
@@ -152,6 +176,8 @@
 		}
 	}
 
+	// restore swaps a snapshot back in; the current world is snapshotted first by the
+	// server so this can be undone.
 	const restore = (w: World, s: Snapshot) =>
 		run(w.id, async () => {
 			await restoreSnapshot(w.id, s.id);
@@ -160,6 +186,7 @@
 			snaps = await getSnapshots(w.id);
 		});
 
+	// when formats a server timestamp for display.
 	function when(iso: string | null) {
 		return iso ? new Date(iso).toLocaleString() : '';
 	}

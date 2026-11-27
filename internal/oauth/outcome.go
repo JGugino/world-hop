@@ -1,3 +1,6 @@
+// outcome.go: the ways a sign-in can end, and the plain-language wording the browser
+// page shows for each. The Go side only classifies; the page template does the drawing.
+
 package oauth
 
 import (
@@ -50,9 +53,14 @@ type flowError struct {
 	err    error
 }
 
+// Error returns the underlying error's text.
 func (e *flowError) Error() string { return e.err.Error() }
+
+// Unwrap returns the underlying error.
 func (e *flowError) Unwrap() error { return e.err }
 
+// fail builds a flowError of a given kind with a formatted message and optional
+// technical detail.
 func fail(kind Kind, detail string, format string, a ...any) error {
 	return &flowError{kind: kind, detail: detail, err: fmt.Errorf(format, a...)}
 }
@@ -125,6 +133,8 @@ func missingScopes(want []string, granted string) []string {
 
 const maxDetail = 300
 
+// clip collapses whitespace and shortens a detail string so a long provider message
+// can't blow up the page.
 func clip(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > maxDetail {

@@ -1,3 +1,9 @@
+<!--
+The page frame every tab shares: the header with the WorldHop name, Force sync and
+the last sync time, the tab bar, the update notice, the shared sync status panel, and
+the footer. It polls /api/status every 3 seconds (which also keeps the local server
+alive while the page is open) and tells the server when the page closes.
+-->
 <script lang="ts">
 	import '$lib/theme.css';
 	import { onMount } from 'svelte';
@@ -8,6 +14,7 @@
 
 	let { children } = $props();
 
+	// The tabs along the top.
 	const tabs = [
 		{ href: '/', label: 'Worlds' },
 		{ href: '/sources', label: 'Saves' },
@@ -16,6 +23,7 @@
 		{ href: '/license', label: 'License' }
 	];
 
+	// ago turns a timestamp into "just now", "5 min ago"...
 	function ago(iso: string | null) {
 		if (!iso) return 'never';
 		const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));

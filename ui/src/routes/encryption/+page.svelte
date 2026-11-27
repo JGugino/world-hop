@@ -1,3 +1,10 @@
+<!--
+The Encryption tab (a Pro feature). Turn client-side encryption on, enter the
+passphrase after a restart, lock, turn off, change the passphrase (with progress
+while every world is re-encrypted), and choose what to do if the cloud's encryption
+key looks rolled back. A lost passphrase cannot be recovered, and the page says so
+wherever it asks for one.
+-->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
@@ -33,6 +40,8 @@
 	let confirmCancel = $state(false);
 	let confirmAccept = $state(false);
 
+	// State for changing the passphrase: running, how far along it is, and whether the new
+	// passphrase is long enough.
 	const rekey = $derived(enc?.rekey);
 	const running = $derived(rekey?.state === 'running');
 	const pct = $derived(
@@ -40,15 +49,20 @@
 	);
 	const newTooShort = $derived(newPass.length > 0 && [...newPass].length < 10);
 
+	// openChange shows the change-passphrase form.
 	function openChange() {
 		changing = true;
 		newRemember = enc?.remember ?? false;
 	}
+	// closeChange hides the form and clears what was typed.
 	function closeChange() {
 		changing = false;
 		curPass = newPass = newConfirm = '';
 		newAck = false;
 	}
+	// startChange starts re-encrypting everything under the new passphrase. The server
+	// checks the current passphrase and returns at once; the work continues in the
+	// background and onMount polls for its progress.
 	async function startChange() {
 		busy = true;
 		error = '';
@@ -67,8 +81,11 @@
 		busy = false;
 	}
 
+	// msg turns an error into text for display.
 	const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+	// load fetches the encryption state, which also carries the progress of a passphrase
+	// change.
 	async function load() {
 		try {
 			enc = await getEncryption();
@@ -77,6 +94,8 @@
 		}
 	}
 
+	// run wraps an encryption action: shows an error if it fails, clears the typed
+	// passphrases, and takes the new state.
 	async function run(fn: () => Promise<Encryption>) {
 		busy = true;
 		error = '';

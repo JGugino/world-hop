@@ -1,3 +1,6 @@
+// scheduler.go: decides when syncing happens. The Runner knows how to run a pass; the
+// Scheduler decides when, by watching which worlds the game has open.
+
 package sync
 
 import (
@@ -20,6 +23,8 @@ type SchedulerConfig struct {
 	Settle time.Duration
 }
 
+// withDefaults fills in the default timings: poll every 5 seconds, a full pass every
+// 10 minutes, and 3 seconds of being closed before a world is pushed.
 func (c SchedulerConfig) withDefaults() SchedulerConfig {
 	if c.PollInterval <= 0 {
 		c.PollInterval = 5 * time.Second
@@ -85,6 +90,13 @@ func (s *Scheduler) Run(ctx context.Context) {
 }
 
 // Poll does one scheduling step. The first call also runs the startup pass.
+//
+// Each call it looks at every world's open/closed state and compares it with the
+// previous poll: a world that just went from open to closed starts a "settle"
+// timer, and once it has stayed closed for Settle it is pushed on its own. A full
+// pass over every world runs at startup and then every SyncInterval; when one is
+// due it covers the worlds that just settled, so they aren't synced twice. Worlds
+// that are open are never synced (the Engine would refuse anyway).
 func (s *Scheduler) Poll(ctx context.Context) {
 	if ctx.Err() != nil {
 		return

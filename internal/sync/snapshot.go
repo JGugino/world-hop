@@ -1,3 +1,7 @@
+// snapshot.go: local snapshots. Before a pull, a conflict resolution or a restore
+// replaces a world, the old version is kept under StateDir/snapshots so the user can
+// always go back. Snapshots are local only; nothing here talks to the store.
+
 package sync
 
 import (
@@ -9,15 +13,20 @@ import (
 	"github.com/JGugino/world-hopper/internal/worlds"
 )
 
+// SnapshotInfo is one saved snapshot: its id (a UTC timestamp plus the reason it
+// was taken, such as "pull" or "conflict") and the folder it lives in.
 type SnapshotInfo struct {
 	ID   string
 	Path string
 }
 
+// snapDir is the folder holding a world's snapshots.
 func (e *Engine) snapDir(id string) string { return filepath.Join(e.StateDir, "snapshots", id) }
 
 // Snapshot copies the current world into the local snapshot area and prunes
-// old ones. It returns the snapshot id.
+// old ones. It returns the snapshot id. The copy is made under a ".partial" name
+// and renamed into place so a crash never leaves a half-copied snapshot that looks
+// complete.
 func (e *Engine) Snapshot(w worlds.World, reason string) (string, error) {
 	id := e.now().Format("20060102T150405.000000Z") + "-" + reason
 	dst := filepath.Join(e.snapDir(w.ID), id)
@@ -37,6 +46,8 @@ func (e *Engine) Snapshot(w worlds.World, reason string) (string, error) {
 	return id, nil
 }
 
+// pruneSnapshots deletes a world's oldest snapshots beyond SnapshotsKeep (5 by
+// default). Ids start with a timestamp, so sorting by id is sorting by age.
 func (e *Engine) pruneSnapshots(worldID string) {
 	keep := e.SnapshotsKeep
 	if keep <= 0 {
@@ -50,7 +61,9 @@ func (e *Engine) pruneSnapshots(worldID string) {
 }
 
 // canMoveSnapshot reports whether a world folder can be renamed into the
-// snapshot area (same volume), by trying it with an empty folder.
+// snapshot area (same volume), by trying it with an empty folder. A rename is
+// instant and uses no extra disk space, so it is preferred over copying a world
+// that may be gigabytes.
 func (e *Engine) canMoveSnapshot(w worlds.World) bool {
 	src := filepath.Join(filepath.Dir(w.Path), ".worldhopper-probe-"+filepath.Base(w.Path))
 	dst := filepath.Join(e.snapDir(w.ID), ".probe.partial")
@@ -114,7 +127,8 @@ func (e *Engine) swapWithSnapshot(w worlds.World, staging, reason string) (strin
 	return id, nil
 }
 
-// Snapshots lists snapshots oldest first.
+// Snapshots lists a world's snapshots, oldest first. A missing snapshot folder is
+// just an empty list.
 func (e *Engine) Snapshots(worldID string) ([]SnapshotInfo, error) {
 	ents, err := os.ReadDir(e.snapDir(worldID))
 	if os.IsNotExist(err) {
@@ -135,7 +149,8 @@ func (e *Engine) Snapshots(worldID string) ([]SnapshotInfo, error) {
 
 // Restore swaps a snapshot back in. The current world is snapshotted first,
 // so a restore can itself be undone. The next push uploads the restored
-// world as a new version.
+// world as a new version. The snapshot id is validated (no path separators) so a
+// caller can't point it outside the snapshot folder.
 func (e *Engine) Restore(w worlds.World, snapshotID string) error {
 	if err := e.checkOpen(w); err != nil {
 		return err

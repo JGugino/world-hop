@@ -1,3 +1,5 @@
+// picker.go: the native folder dialog the Saves tab uses to choose a folder.
+
 package api
 
 import (
@@ -62,6 +64,9 @@ end try`
 	return p, nil
 }
 
+// registerPicker adds POST /api/pick-folder, which opens the operating system's
+// own folder dialog on this computer and returns the chosen path. (A web page can't
+// learn a real folder path itself, so the Saves tab asks the program to.)
 func (s *Server) registerPicker(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/pick-folder", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
@@ -75,6 +80,7 @@ func (s *Server) registerPicker(mux *http.ServeMux) {
 	})
 }
 
+// pickFn returns the folder picker in use: the test override, or the real dialog.
 func (s *Server) pickFn() func(context.Context, string) (string, error) {
 	if s.Pick != nil {
 		return s.Pick

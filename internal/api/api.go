@@ -1,4 +1,18 @@
 // Package api serves the local HTTP API and embedded UI on 127.0.0.1.
+//
+// The web view (the SvelteKit app in ui/) is the only user interface, and it talks to
+// the rest of the program through this package. Nothing here makes sync decisions: each
+// handler checks its input, calls the sync Runner or one of the managers (cloud
+// account, encryption, license, sources, updates) and returns JSON. The server is
+// loopback-only, rejects requests with a foreign Host or Origin (so a web page the
+// user happens to visit can't drive it), and only exists while the web view is open
+// (see lazy.go).
+//
+// Files: api.go (the server and its guards), routes.go (the endpoints and the
+// interfaces they depend on), encryption.go (the Encryption tab's endpoints),
+// providers.go (the Cloud account tab's types), lazy.go (start and stop on demand),
+// picker.go (the native folder dialog). docs/technical.md section 2.4 lists every
+// endpoint.
 package api
 
 import (
@@ -15,6 +29,9 @@ import (
 	"github.com/JGugino/world-hopper/internal/sync"
 )
 
+// Server is one running instance of the local API. svc is the sync Runner, deps the
+// managers the settings endpoints use, and assets the built UI. It records when the
+// last request arrived so Lazy can stop it when it has been idle.
 type Server struct {
 	svc    *sync.Runner
 	deps   Deps
@@ -49,6 +66,9 @@ func New(addr string, svc *sync.Runner, assets fs.FS, deps Deps) (*Server, error
 	return s, nil
 }
 
+// Handler builds the request handler: the status and sync endpoints, the settings
+// routes, the folder picker, and the embedded UI for everything else, all wrapped in
+// hostGuard.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +116,9 @@ func hostGuard(next http.Handler) http.Handler {
 	})
 }
 
+// static serves the embedded UI. Anything that is not a file falls back to
+// index.html so the single-page app's client-side routes (/cloud, /license...) work
+// when reloaded or opened directly. If the UI was never built it says how to build it.
 func (s *Server) static() http.Handler {
 	files := http.FileServerFS(s.assets)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,13 +141,19 @@ func (s *Server) static() http.Handler {
 	})
 }
 
-func (s *Server) URL() string  { return "http://" + s.ln.Addr().String() + "/" }
+// URL is the address the server listens on, for opening in the browser.
+func (s *Server) URL() string { return "http://" + s.ln.Addr().String() + "/" }
+
+// Serve runs the server until Close.
 func (s *Server) Serve() error { return s.srv.Serve(s.ln) }
 
 // LastActivity reports when the server last received a request (or started).
 func (s *Server) LastActivity() time.Time { return time.Unix(0, s.last.Load()) }
-func (s *Server) Close() error            { return s.srv.Close() }
 
+// Close stops the server immediately.
+func (s *Server) Close() error { return s.srv.Close() }
+
+// writeJSON writes v as a JSON response.
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)

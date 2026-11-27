@@ -69,6 +69,9 @@ type Info struct {
 	Error       string     `json:"error,omitempty"` // last re-check problem, e.g. "refunded"
 }
 
+// saved is what license.json holds: the license key, when it was last verified
+// with Gumroad, which world the free tier syncs, and the last re-check problem. This
+// file is the only license state; there is no server.
 type saved struct {
 	Key        string    `json:"key,omitempty"`
 	VerifiedAt time.Time `json:"verifiedAt,omitempty"`
@@ -109,6 +112,8 @@ func New(dir string) (*Manager, error) {
 	return m, nil
 }
 
+// save writes license.json atomically with owner-only permissions. The caller holds
+// m.mu.
 func (m *Manager) save() error {
 	b, err := json.MarshalIndent(m.s, "", "  ")
 	if err != nil {
@@ -213,6 +218,8 @@ func (m *Manager) Info() Info {
 	return in
 }
 
+// mask hides most of a license key for display: the first and last four
+// characters, or all dots if it is short.
 func mask(k string) string {
 	if len(k) <= 8 {
 		return strings.Repeat("•", len(k))
@@ -288,6 +295,9 @@ func (m *Manager) Refresh(ctx context.Context) {
 	_ = m.save()
 }
 
+// verifyResp is the part of Gumroad's license-verification reply this package
+// reads: whether the key is valid and whether the purchase was later refunded,
+// charged back or disputed.
 type verifyResp struct {
 	Success  bool `json:"success"`
 	Purchase struct {

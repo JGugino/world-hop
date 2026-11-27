@@ -1,21 +1,31 @@
+<!--
+The sync status panel at the top of every page: a headline for the last pass (in
+sync, waiting for Minecraft to close, needs attention, or a problem), a progress bar
+while syncing, and each problem with what to do about it and a link to the tab where
+it can be fixed.
+-->
 <script lang="ts">
 	import type { Status, Problem } from './api';
 	import { ago } from './status.svelte';
 
 	let { status }: { status: Status } = $props();
 
+	// fixLabel: the text of the link to the tab where a problem can be fixed.
 	const fixLabel: Record<string, string> = {
 		'/cloud': 'Open Cloud account',
 		'/license': 'Open License',
 		'/encryption': 'Open Encryption',
 		'/sources': 'Open Saves'
 	};
+	// phase: what the running sync says it is doing.
 	const phase = {
 		checking: 'Checking for changes',
 		uploading: 'Uploading to the cloud',
 		downloading: 'Downloading from the cloud'
 	};
 
+	// Derived display values: whether a sync is running, its problems, the colour of the
+	// panel, the headline, and how far through the worlds the pass is.
 	const syncing = $derived(status.state === 'syncing');
 	const problems = $derived(status.problems ?? []);
 	const tone = $derived(
@@ -45,6 +55,7 @@
 	const p = $derived(status.progress);
 	const pct = $derived(p ? Math.min(100, (p.done / Math.max(p.total, 1)) * 100) : 0);
 
+	// names lists the worlds a problem affects.
 	function names(pr: Problem) {
 		return (pr.worlds ?? []).join(', ');
 	}

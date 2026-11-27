@@ -1,5 +1,8 @@
 //go:build webview
 
+// webview.go: opening the web view in a native window. Only built with -tags webview,
+// which needs cgo and the platform's webview library.
+
 package window
 
 import (

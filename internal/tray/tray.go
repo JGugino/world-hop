@@ -1,4 +1,6 @@
-// Package tray provides the system tray icon and menu.
+// Package tray provides the system tray icon and menu. This is where WorldHop
+// lives: there is no window, only the tray icon with Open Web View, Force Sync,
+// Exit and (when a newer release exists) Update available.
 package tray
 
 import (
@@ -7,6 +9,9 @@ import (
 	"fyne.io/systray"
 )
 
+// Handlers are what the menu items do. OpenView and Exit run on the menu's own
+// goroutine; ForceSync and OpenUpdate are started in goroutines of their own, so a
+// slow sync or a browser launch never freezes the menu.
 type Handlers struct {
 	OpenView  func()
 	ForceSync func()
@@ -31,6 +36,8 @@ func SetUpdate(version, url string) {
 	applyUpdate()
 }
 
+// applyUpdate shows or hides the "Update available" item to match the current
+// version label. Callers hold updMu.
 func applyUpdate() {
 	if updItem == nil {
 		return

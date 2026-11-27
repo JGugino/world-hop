@@ -1,3 +1,6 @@
+// config.go: where the Google OAuth client IDs come from: compiled in at release, with
+// optional developer overrides.
+
 package link
 
 import (

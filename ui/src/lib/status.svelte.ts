@@ -7,6 +7,8 @@ class StatusStore {
 	/** Bumped whenever a sync finishes, so pages know to reload their data. */
 	generation = $state(0);
 
+	// refresh polls /api/status. It bumps `generation` when a sync has just finished
+	// (state went from syncing to idle), so pages know to reload their own data.
 	async refresh() {
 		try {
 			const prev = this.current;
@@ -18,6 +20,8 @@ class StatusStore {
 		}
 	}
 
+	// sync runs a Force sync and takes the status it returns; `generation` is bumped so
+	// pages reload afterwards.
 	async sync() {
 		try {
 			this.current = { ...(this.current as Status), state: 'syncing' };
@@ -30,6 +34,7 @@ class StatusStore {
 	}
 }
 
+// The one shared instance: the layout polls it, every page reads it.
 export const status = new StatusStore();
 
 /** "just now", "5 min ago"... for a timestamp from the server. */

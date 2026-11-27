@@ -1,5 +1,7 @@
 //go:build linux || darwin
 
+// lock_unix.go: probing Minecraft's world lock on Linux and macOS with fcntl.
+
 package detect
 
 import (
@@ -13,6 +15,9 @@ import (
 // can see without taking the lock ourselves.
 type PlatformLockProber struct{}
 
+// Held reports whether another process holds a lock on the file at path. It asks
+// the OS with F_GETLK, which describes a conflicting lock without taking one, so
+// probing never disturbs the game. A missing file is not held.
 func (PlatformLockProber) Held(path string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {

@@ -1,5 +1,7 @@
 // Package config persists the user's settings (currently the list of sync
-// sources) in a small JSON file.
+// sources) in a small JSON file (config.json). The other state files
+// (provider.json, license.json, encryption.json, ...) belong to the managers that own
+// them; this one is the Saves tab's list of what to keep synced.
 package config
 
 import (
@@ -158,6 +160,8 @@ outer:
 	return c.saveLocked()
 }
 
+// saveLocked writes the config atomically (temp file and rename). The caller holds
+// c.mu.
 func (c *Config) saveLocked() error {
 	b, err := json.MarshalIndent(file{Sources: c.sources}, "", "  ")
 	if err != nil {

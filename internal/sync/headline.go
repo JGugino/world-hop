@@ -1,3 +1,6 @@
+// headline.go: the one-line status text for places with almost no room, such as the
+// tray icon's tooltip, plus the "5 min ago" formatting the UI and tooltip share.
+
 package sync
 
 import (
@@ -21,7 +24,9 @@ func Ago(t, now time.Time) string {
 }
 
 // Headline is the status in one line, for places with no room for more, like
-// the tray tooltip (Windows cuts those at 127 characters).
+// the tray tooltip (Windows cuts those at 127 characters, so it is capped at 120).
+// What it says, in priority order: syncing (with the world and "n of m"), the
+// first problem, "up to date" with the last sync time, or "No sync yet".
 func (s RunnerStatus) Headline(now time.Time) string {
 	var line string
 	switch {

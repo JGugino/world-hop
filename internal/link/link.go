@@ -1,6 +1,17 @@
 // Package link owns the user's cloud account: which provider is chosen, the
 // OAuth link flow, token storage, and the store.Store that syncs through it.
 // It is the Go API the web UI's /api/cloud endpoints sit on.
+//
+// The Manager here is the bottom of the store stack the sync engine sees (engine ->
+// crypt.Manager -> link.Manager -> gdrive/s3). Because it implements store.Store by
+// delegating to whichever provider is chosen and linked, the engine is built once and
+// follows the user's choice: connecting, disconnecting or switching provider needs no
+// restart. When nothing usable is linked, every store call fails with ErrNotLinked
+// and the UI says so.
+//
+// Files: link.go (the Manager and the sign-in flow), s3.go (the S3-compatible
+// provider, a Pro feature, set up with a form), providers.go (adapters to the
+// api package's interfaces), config.go (OAuth client IDs).
 package link
 
 import (
@@ -59,6 +70,9 @@ type Status struct {
 	Providers []ProviderStatus `json:"providers"`
 }
 
+// provider is one cloud choice: its OAuth settings (Drive), how to build its store
+// from credentials, and flags saying it is set up with a form instead of a sign-in
+// (S3) or needs a Pro license.
 type provider struct {
 	id, name   string
 	configured bool
@@ -130,8 +144,10 @@ func New(cfg Config, tokens oauth.TokenStore, stateDir string) *Manager {
 	return m
 }
 
+// choiceFile is where the chosen provider is saved (provider.json in the state dir).
 func (m *Manager) choiceFile() string { return filepath.Join(m.dir, "provider.json") }
 
+// loadChoice reads the saved provider id; an unknown or missing choice is none.
 func (m *Manager) loadChoice() string {
 	b, err := os.ReadFile(m.choiceFile())
 	if err != nil {
@@ -146,6 +162,7 @@ func (m *Manager) loadChoice() string {
 	return v.Provider
 }
 
+// saveChoice records the chosen provider (written atomically, owner-only).
 func (m *Manager) saveChoice(id string) error {
 	if err := os.MkdirAll(m.dir, 0o700); err != nil {
 		return err
@@ -158,6 +175,8 @@ func (m *Manager) saveChoice(id string) error {
 	return os.Rename(tmp, m.choiceFile())
 }
 
+// linked reports whether credentials are stored for a provider (for S3, both the
+// settings and the keys), without checking they still work.
 func (m *Manager) linked(id string) bool {
 	if id == S3 {
 		return m.s3Linked()
@@ -257,6 +276,10 @@ func (m *Manager) StartLink(id string) (string, error) {
 	return pend.AuthURL, nil
 }
 
+// finish runs in the background after StartLink: it waits for the browser sign-in
+// to complete, saves the tokens in the keychain, and then tells the browser page how it
+// ended (Pending.Saved), so the page only says "connected" when it really is. If the
+// attempt was cancelled or replaced meanwhile it just tells the page that.
 func (m *Manager) finish(id string, pend *oauth.Pending) {
 	tok, err := pend.Wait(context.Background())
 	m.mu.Lock()
@@ -287,6 +310,8 @@ func (m *Manager) changed() {
 	}
 }
 
+// resetProvider drops everything built for a provider (its store and token source)
+// and any re-authorisation flag, so the next call rebuilds from what is stored now.
 func (m *Manager) resetProvider(id string) {
 	delete(m.reauth, id)
 	delete(m.stores, id)
@@ -328,7 +353,11 @@ func (m *Manager) Unlink(id string) error {
 	return nil
 }
 
-// current returns the chosen provider's store, building it on first use.
+// current returns the chosen provider's store, building it on first use. It is the
+// single place that decides whether a store call may proceed: nothing chosen or linked
+// is ErrNotLinked, a revoked or expired grant is oauth.ErrReauth, and Pro storage is
+// re-checked against the license on every call, so a lapsed license stops S3 even
+// though its store is already built.
 func (m *Manager) current() (store.Store, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -380,6 +409,11 @@ func (m *Manager) wrap(id string, err error) error {
 	return err
 }
 
+// PutPack stores a pack on the chosen provider. Like GetPack, PutManifest, GetManifest,
+// ListManifests, MissingPacks and ListWorlds below, it implements store.Store: it asks
+// current for the provider's store (failing if none is linked, the grant expired, or
+// Pro storage is no longer licensed), runs the call, and maps credential failures onto
+// the link state with wrap.
 func (m *Manager) PutPack(ctx context.Context, name string, data []byte) error {
 	s, id, err := m.current()
 	if err != nil {
@@ -388,6 +422,7 @@ func (m *Manager) PutPack(ctx context.Context, name string, data []byte) error {
 	return m.wrap(id, s.PutPack(ctx, name, data))
 }
 
+// GetPack fetches a pack from the chosen provider.
 func (m *Manager) GetPack(ctx context.Context, name string) ([]byte, error) {
 	s, id, err := m.current()
 	if err != nil {
@@ -397,6 +432,7 @@ func (m *Manager) GetPack(ctx context.Context, name string) ([]byte, error) {
 	return b, m.wrap(id, err)
 }
 
+// PutManifest stores a manifest on the chosen provider (never overwriting).
 func (m *Manager) PutManifest(ctx context.Context, world, name string, data []byte) error {
 	s, id, err := m.current()
 	if err != nil {
@@ -405,6 +441,7 @@ func (m *Manager) PutManifest(ctx context.Context, world, name string, data []by
 	return m.wrap(id, s.PutManifest(ctx, world, name, data))
 }
 
+// GetManifest fetches a manifest from the chosen provider.
 func (m *Manager) GetManifest(ctx context.Context, world, name string) ([]byte, error) {
 	s, id, err := m.current()
 	if err != nil {
@@ -414,6 +451,7 @@ func (m *Manager) GetManifest(ctx context.Context, world, name string) ([]byte, 
 	return b, m.wrap(id, err)
 }
 
+// ListManifests lists a world's manifest names on the chosen provider.
 func (m *Manager) ListManifests(ctx context.Context, world string) ([]string, error) {
 	s, id, err := m.current()
 	if err != nil {
@@ -437,6 +475,7 @@ func (m *Manager) MissingPacks(ctx context.Context, names []string) ([]string, e
 	return miss, m.wrap(id, err)
 }
 
+// ListWorlds lists the worlds on the chosen provider.
 func (m *Manager) ListWorlds(ctx context.Context) ([]string, error) {
 	s, id, err := m.current()
 	if err != nil {
@@ -450,10 +489,12 @@ func (m *Manager) ListWorlds(ctx context.Context) ([]string, error) {
 // Its message is aimed at developers: end users of a release build never see it.
 type NotConfiguredError struct{ Provider, Hint string }
 
+// Error says which provider has no client id and how a developer would set one.
 func (e *NotConfiguredError) Error() string {
 	return fmt.Sprintf("%s sign-in is not set up in this build: no OAuth client ID was compiled in. "+
 		"Release builds include one (see docs/cloud-setup.md); for a development build set %s or add it to cloud.json",
 		e.Provider, e.Hint)
 }
 
+// Is lets errors.Is(err, ErrNotConfigured) match this error.
 func (e *NotConfiguredError) Is(target error) bool { return target == ErrNotConfigured }

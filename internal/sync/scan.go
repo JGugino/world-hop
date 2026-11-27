@@ -1,3 +1,8 @@
+// scan.go: reading a local world. Turns a folder of files into the list of files and
+// chunk hashes a manifest needs, and remembers results in a stat cache so rescanning an
+// unchanged world only has to stat files, not read them. A world open in Minecraft can
+// be large (gigabytes of region files), so this speed matters.
+
 package sync
 
 import (
@@ -49,8 +54,11 @@ type statCache struct {
 	dirty   bool
 }
 
+// statCacheVersion is bumped when the cache file format changes; a cache with a
+// different version is ignored (and rebuilt by the next scan).
 const statCacheVersion = 1
 
+// statCacheFile is the cache as stored on disk (JSON).
 type statCacheFile struct {
 	Version int                  `json:"version"`
 	Files   map[string]localFile `json:"files"`
@@ -73,6 +81,7 @@ func loadStatCache(path string) *statCache {
 	return c
 }
 
+// get returns the cached entry for a relative path, if any.
 func (c *statCache) get(rel string) (localFile, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -80,6 +89,7 @@ func (c *statCache) get(rel string) (localFile, bool) {
 	return f, ok
 }
 
+// put records a freshly hashed file and marks the cache dirty so save writes it.
 func (c *statCache) put(rel string, f localFile) {
 	c.mu.Lock()
 	c.entries[rel] = f
@@ -131,6 +141,8 @@ type scanResult struct {
 	Local map[string]localFile // by relative path
 }
 
+// candidate is a file found by listFiles, before it is hashed: its relative path
+// (slash separated), absolute path, size, modification time and permission bits.
 type candidate struct {
 	rel, abs string
 	size     int64
@@ -138,7 +150,10 @@ type candidate struct {
 	mode     uint32
 }
 
-// listFiles walks dir for syncable regular files (never session.lock).
+// listFiles walks dir for syncable regular files, sorted by relative path. It
+// skips symlinks and devices (they are not synced) and session.lock (the game's
+// lock file is never synced; manifest.SafePath rejects it). The sort keeps the
+// tree hash identical on every computer.
 func listFiles(dir string) ([]candidate, error) {
 	var out []candidate
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -168,7 +183,8 @@ func listFiles(dir string) ([]candidate, error) {
 }
 
 // hashFile chunks and hashes one file, without keeping any data. It reports
-// whether the file looked stable (same size and mtime before and after).
+// whether the file looked stable (same size and mtime before and after); a file the
+// game was writing while we read it is not trusted for the cache.
 func hashFile(c candidate) (localFile, bool, error) {
 	f, err := os.Open(c.abs)
 	if err != nil {
@@ -196,7 +212,9 @@ func hashFile(c candidate) (localFile, bool, error) {
 
 // scan lists dir and returns every file's chunk list. Files whose size and
 // mtime match the cache are not read at all; the rest are hashed by a bounded
-// pool of workers. cache may be nil.
+// pool of workers. cache may be nil. Newly hashed files go into the cache only if
+// they were stable and older than racyWindow, so a file still being modified is
+// re-hashed next time.
 func scan(dir string, cache *statCache) (*scanResult, error) {
 	cands, err := listFiles(dir)
 	if err != nil {
@@ -270,9 +288,11 @@ func scan(dir string, cache *statCache) (*scanResult, error) {
 	return res, nil
 }
 
-// feedChunks reads file rel again and hands every chunk that need approves
-// to onChunk, returning the file's fresh chunk list. It is the upload side of
-// a scan: only files holding chunks the store lacks are read a second time.
+// feedChunks reads the file at path again and hands every chunk to onChunk,
+// returning the file's fresh chunk list. It is the upload side of a scan: only
+// files holding chunks the store lacks are read a second time. The returned list is
+// what the manifest records, so it describes exactly what was uploaded even if the
+// game changed the file since the scan.
 func feedChunks(path string, onChunk func(hash string, data []byte) error) (localFile, error) {
 	f, err := os.Open(path)
 	if err != nil {
