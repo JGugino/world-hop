@@ -4,9 +4,9 @@ title: WorldHop Terms of Service
 
 # WorldHop Terms of Service
 
-**Effective date:** [EFFECTIVE DATE: set when published]
+**Effective date:** November 26, 2026
 **Provider:** Gugino Software Solutions ("we", "us")
-**Contact:** [CONTACT EMAIL: replace before publishing]
+**Contact:** gugino@gugino.org
 
 By downloading, installing or using WorldHop ("the Software") you agree to these terms. If you do
 not agree, do not use it.
@@ -91,6 +91,6 @@ without regard to conflict-of-law rules. If a provision is unenforceable, the re
 
 ## 11. Contact
 
-[CONTACT EMAIL: replace before publishing]
+gugino@gugino.org
 
 *This document is not legal advice.*
