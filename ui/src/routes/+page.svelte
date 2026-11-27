@@ -4,6 +4,7 @@
 		getWorlds,
 		syncWorld,
 		resolveConflict,
+		resolveLost,
 		getSnapshots,
 		restoreSnapshot,
 		getCloudWorlds,
@@ -13,7 +14,8 @@
 		type World,
 		type WorldStatus,
 		type Snapshot,
-		type Strategy
+		type Strategy,
+		type LostAction
 	} from '$lib/api';
 	import { status } from '$lib/status.svelte';
 
@@ -31,6 +33,7 @@
 		'local-ahead': 'Changes to upload',
 		'remote-ahead': 'Newer version in the cloud',
 		conflict: 'Conflict',
+		'cloud-lost': 'Cloud data missing',
 		'no-remote': 'Not uploaded yet',
 		'no-local': 'Only in the cloud',
 		unknown: 'Unknown'
@@ -40,6 +43,7 @@
 		'local-ahead': 'info',
 		'remote-ahead': 'info',
 		conflict: 'bad',
+		'cloud-lost': 'bad',
 		'no-remote': 'info',
 		'no-local': 'info',
 		unknown: 'muted'
@@ -105,6 +109,28 @@
 	}
 
 	const sync = (w: World) => run(w.id, () => syncWorld(w.id));
+
+	// Data the cloud lost: nothing happens until the person picks, and confirms.
+	let confirmLost = $state<{ id: string; action: LostAction } | null>(null);
+	const lostActions: Record<LostAction, { label: string; help: string }> = {
+		'accept-cloud': {
+			label: 'Use the cloud as it is now',
+			help: 'Forget the missing history and go by what the cloud holds. If this computer’s copy differs from what is left there, you get the usual conflict choices and nothing is replaced. If the world is gone from the cloud entirely, the next sync uploads this computer’s copy.'
+		},
+		reupload: {
+			label: 'Upload this computer’s copy',
+			help: 'Upload this computer’s world as a new version, rebuilding whatever the cloud lost.'
+		}
+	};
+	const doLost = (w: World, a: LostAction) =>
+		run(w.id, async () => {
+			await resolveLost(w.id, a);
+			confirmLost = null;
+			notice =
+				a === 'reupload'
+					? `${w.name}: uploaded this computer’s copy.`
+					: `${w.name}: now going by what the cloud holds.`;
+		});
 
 	const resolve = (w: World, s: Strategy) =>
 		run(w.id, async () => {
@@ -240,6 +266,65 @@
 				</p>
 			{/if}
 
+			{#if w.status === 'cloud-lost' && w.lost}
+				<div class="conflict lost">
+					<p>
+						{#if w.lost.kind === 'world'}
+							<b>This world is no longer in your cloud.</b> This computer had seen {w.lost.versions}
+							version{w.lost.versions === 1 ? '' : 's'} of it.
+						{:else if w.lost.kind === 'versions'}
+							<b>Your cloud has lost {w.lost.versions} version{w.lost.versions === 1 ? '' : 's'} of this
+							world</b> that this computer had already seen ({w.lost.remaining} still
+							{w.lost.remaining === 1 ? 'is' : 'are'} there).
+						{:else}
+							<b>Your cloud still lists this world, but data it needs is missing</b>{#if w.lost.packs > 0}
+								({w.lost.packs} piece{w.lost.packs === 1 ? '' : 's'}){/if}.
+						{/if}
+					</p>
+					<p class="muted small">
+						Something deleted data or rolled your cloud account back. This also happens if you connected
+						a different cloud account or cleared WorldHop’s data in your cloud yourself. WorldHop has
+						changed nothing, here or in the cloud, and won’t until you choose.
+					</p>
+					{#if w.lost.canAccept || w.lost.canReupload}
+						<div class="row">
+							{#if w.lost.canAccept}
+								<button class="secondary" disabled={busy === w.id || w.open}
+									onclick={() => (confirmLost = { id: w.id, action: 'accept-cloud' })}>
+									{lostActions['accept-cloud'].label}
+								</button>
+							{/if}
+							{#if w.lost.canReupload}
+								<button disabled={busy === w.id || w.open}
+									onclick={() => (confirmLost = { id: w.id, action: 'reupload' })}>
+									{lostActions.reupload.label}
+								</button>
+							{/if}
+						</div>
+					{/if}
+					{#if !w.lost.canReupload}
+						<p class="muted small">
+							This computer has no copy of the world to upload. A computer that has it can rebuild it from there.
+						</p>
+					{/if}
+					{#if confirmLost && confirmLost.id === w.id}
+						<div class="confirm">
+							<p><b>{lostActions[confirmLost.action].label}?</b> {lostActions[confirmLost.action].help}</p>
+							<div class="row">
+								<button class={confirmLost.action === 'reupload' ? '' : 'secondary'} disabled={busy === w.id}
+									onclick={() => doLost(w, confirmLost!.action)}>Yes, do this</button>
+								<button class="secondary" onclick={() => (confirmLost = null)}>Cancel</button>
+							</div>
+						</div>
+					{:else}
+						<ul class="muted small">
+							{#if w.lost.canAccept}<li><b>{lostActions['accept-cloud'].label}:</b> {lostActions['accept-cloud'].help}</li>{/if}
+							{#if w.lost.canReupload}<li><b>{lostActions.reupload.label}:</b> {lostActions.reupload.help}</li>{/if}
+						</ul>
+					{/if}
+				</div>
+			{/if}
+
 			{#if w.status === 'conflict'}
 				<div class="conflict">
 					<p>
@@ -321,6 +406,7 @@
 	.note { margin: 8px 0 0; font-size: 0.92rem; color: var(--warn); }
 	.note.bad { color: var(--bad); }
 	.conflict { border: 2px solid #000; border-left: 6px solid var(--bad); background: #00000040; padding: 4px 14px 10px; margin-top: 12px; }
+	.confirm { border: 2px solid #000; border-left: 6px solid var(--warn); background: #00000040; padding: 2px 14px 10px; margin-top: 10px; }
 	.conflict ul { padding-left: 18px; margin: 8px 0 0; }
 	.snaps { margin-top: 12px; border: 2px solid #000; background: #111315; box-shadow: inset 2px 2px 0 #000; padding: 4px 12px; }
 	.snaps ul { list-style: none; margin: 0; padding: 0; }

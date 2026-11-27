@@ -62,6 +62,8 @@ type Engine struct {
 	// phase is "uploading" or "downloading". It may be called from any
 	// goroutine and must not block.
 	OnPhase func(worldID, phase string)
+
+	lost lostData // worlds whose stored versions need packs the cloud lost
 }
 
 func (e *Engine) phase(worldID, phase string) {
@@ -150,9 +152,37 @@ type head struct {
 // listing request, and only manifests written since the last pass are fetched
 // (concurrently).
 func (e *Engine) heads(ctx context.Context, id string) ([]head, error) {
+	return e.headsOpt(ctx, id, false)
+}
+
+// headsOpt is heads; ignoreLost carries on when the cloud no longer lists
+// versions this computer has seen (only the person's own choice does that).
+func (e *Engine) headsOpt(ctx context.Context, id string, ignoreLost bool) ([]head, error) {
 	names, err := e.Store.ListManifests(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if !ignoreLost {
+		if le := e.lostVersions(id, names); le != nil {
+			// A listing can lag behind an upload (Google Drive's can, by seconds),
+			// and this computer's own newest version is in its cache at once. Look
+			// again before calling something lost.
+			if packRecheckDelay > 0 {
+				select {
+				case <-time.After(packRecheckDelay):
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			again, err := e.Store.ListManifests(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if le = e.lostVersions(id, again); le != nil {
+				return nil, le
+			}
+			names = again
+		}
 	}
 	loaded := make([]*manifest.Manifest, len(names))
 	var missing []int
@@ -245,12 +275,6 @@ func (e *Engine) cacheManifest(id, name string, m *manifest.Manifest) {
 	}
 }
 
-// dropManifestCache forgets the saved manifests of a world, for when the store
-// no longer matches what was saved (for example it was emptied and refilled).
-func (e *Engine) dropManifestCache(id string) {
-	os.RemoveAll(filepath.Join(e.scoped("manifests"), id))
-}
-
 func (e *Engine) statCache(id string) *statCache {
 	return loadStatCache(filepath.Join(e.scoped("cache"), id+".json"))
 }
@@ -308,6 +332,9 @@ const (
 	StatusLocalAhead  Status = "local-ahead"  // local changes to push
 	StatusRemoteAhead Status = "remote-ahead" // newer stored version to pull
 	StatusConflict    Status = "conflict"
+	// StatusCloudLost: the cloud no longer holds what this computer last saw (see
+	// LostError). The world is not synced until the person chooses what to do.
+	StatusCloudLost Status = "cloud-lost"
 )
 
 // view is one look at a world: the stored heads and the local files. Every
@@ -362,8 +389,15 @@ func (e *Engine) status(w worlds.World, v *view) Status {
 // Status compares the local world with the store without changing anything.
 func (e *Engine) Status(ctx context.Context, w worlds.World) (Status, error) {
 	v, err := e.look(ctx, w)
+	var le *LostError
+	if errors.As(err, &le) {
+		return StatusCloudLost, nil
+	}
 	if err != nil {
 		return "", err
+	}
+	if e.lost.get(w.ID) != nil {
+		return StatusCloudLost, nil
 	}
 	return e.status(w, v), nil
 }
@@ -405,6 +439,10 @@ type SyncResult struct {
 func (e *Engine) Sync(ctx context.Context, w worlds.World) (SyncResult, error) {
 	v, err := e.look(ctx, w)
 	if err != nil {
+		var le *LostError
+		if errors.As(err, &le) {
+			return SyncResult{Status: StatusCloudLost}, err
+		}
 		return SyncResult{}, err
 	}
 	res := SyncResult{Status: e.status(w, v)}
@@ -476,6 +514,22 @@ func (e *Engine) pushWith(ctx context.Context, w worlds.World, v *view) (PushRes
 // the world taken just before; only files holding chunks the store does not
 // already have are read again.
 func (e *Engine) upload(ctx context.Context, w worlds.World, hs []head, sc *scanResult) (PushResult, error) {
+	return e.uploadWith(ctx, w, hs, sc, uploadOpts{})
+}
+
+// uploadOpts changes how upload treats data the cloud may have lost. Only the
+// person's own choice (ResolveLost) sets them.
+type uploadOpts struct {
+	// repair carries on past packs the cloud lost, uploading those chunks again
+	// instead of refusing.
+	repair bool
+	// noReuse uploads every chunk, trusting no stored pack.
+	noReuse bool
+	// minGen: the new version's generation is at least minGen+1.
+	minGen int64
+}
+
+func (e *Engine) uploadWith(ctx context.Context, w worlds.World, hs []head, sc *scanResult, opts uploadOpts) (PushResult, error) {
 	e.phase(w.ID, "uploading")
 	known := map[string]manifest.ChunkLoc{}
 	var gen int64
@@ -488,6 +542,29 @@ func (e *Engine) upload(ctx context.Context, w worlds.World, hs []head, sc *scan
 			gen = h.M.Generation
 		}
 		parents = append(parents, h.Name)
+	}
+	if opts.minGen > gen {
+		gen = opts.minGen
+	}
+	if opts.noReuse {
+		known = map[string]manifest.ChunkLoc{}
+	}
+	// Build only on data the store still has.
+	missing, err := e.missingPacks(ctx, known)
+	if err != nil {
+		return PushResult{}, err
+	}
+	if len(missing) > 0 {
+		if !opts.repair {
+			le := &LostError{WorldID: w.ID, Kind: LostData, Packs: len(missing)}
+			e.lost.set(w.ID, le)
+			return PushResult{}, le
+		}
+		for h, loc := range known {
+			if missing[loc.Pack] {
+				delete(known, h)
+			}
+		}
 	}
 	sort.Strings(parents)
 	chunks := map[string]manifest.ChunkLoc{}
@@ -584,6 +661,7 @@ func (e *Engine) upload(ctx context.Context, w worlds.World, hs []head, sc *scan
 	if err := e.saveState(w.ID, state{m.Name(), m.TreeHash()}); err != nil {
 		return PushResult{}, err
 	}
+	e.lost.clear(w.ID)
 	return PushResult{Manifest: m.Name(), Pushed: true, NewBytes: newBytes}, nil
 }
 
@@ -645,18 +723,18 @@ func (e *Engine) apply(ctx context.Context, w worlds.World, h head, reason strin
 		local, _ = scan(w.Path, e.statCache(w.ID)) // only used to avoid downloads
 	}
 	err := e.materialize(ctx, h.M, staging, w.Path, local)
-	if err != nil && errors.Is(err, store.ErrNotFound) {
-		// A saved manifest may describe packs the store no longer has (it was
-		// emptied and refilled). Forget the saved ones and look again.
-		os.RemoveAll(staging)
-		os.MkdirAll(staging, 0o755)
-		e.dropManifestCache(w.ID)
-		err = e.materialize(ctx, h.M, staging, w.Path, local)
-	}
 	if err != nil {
 		os.RemoveAll(staging)
+		if errors.Is(err, store.ErrNotFound) {
+			// The version is listed but a pack it needs is gone. Report it; never
+			// patch it up from what happens to be on this computer.
+			le := &LostError{WorldID: w.ID, Kind: LostData}
+			e.lost.set(w.ID, le)
+			return PullResult{}, le
+		}
 		return PullResult{}, err
 	}
+	e.lost.clear(w.ID)
 	fresh := cacheFromManifest(h.M, staging)
 	res := PullResult{Manifest: h.Name, Updated: true}
 	if exists {

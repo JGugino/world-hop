@@ -37,6 +37,22 @@ type WorldInfo struct {
 	Error string `json:"error,omitempty"`
 	Hint  string `json:"hint,omitempty"`
 	Fix   string `json:"fix,omitempty"`
+	// Lost says what the cloud lost, when Status is "cloud-lost".
+	Lost *LostInfo `json:"lost,omitempty"`
+}
+
+// LostInfo is what the UI shows about data the cloud lost.
+type LostInfo struct {
+	Kind LostKind `json:"kind"`
+	// Versions seen before and missing now; Remaining still listed.
+	Versions  int `json:"versions"`
+	Remaining int `json:"remaining"`
+	// Packs found missing (0 when unknown).
+	Packs int `json:"packs"`
+	// CanAccept: the cloud can be taken as it is now (not for missing data).
+	CanAccept bool `json:"canAccept"`
+	// CanReupload: this computer has a copy to upload.
+	CanReupload bool `json:"canReupload"`
 }
 
 // Worlds lists every world in the configured sources with its sync status.
@@ -61,6 +77,12 @@ func (r *Runner) Worlds(ctx context.Context) []WorldInfo {
 				info.Error, info.Hint, info.Fix = p.Title, p.Action, p.Fix
 			} else {
 				info.Status = string(st)
+				if st == StatusCloudLost {
+					if le, err := r.engine.LostDetails(ctx, w.ID); err == nil && le != nil {
+						info.Lost = &LostInfo{Kind: le.Kind, Versions: len(le.Versions), Remaining: le.Remaining,
+							Packs: le.Packs, CanAccept: len(le.Versions) > 0, CanReupload: worlds.IsWorld(w.Path)}
+					}
+				}
 			}
 		}
 		out[i] = info
@@ -104,6 +126,23 @@ func (r *Runner) Resolve(ctx context.Context, id string, s Strategy) (ResolveRes
 	r.pass.Lock() // don't race a sync pass
 	defer r.pass.Unlock()
 	return r.engine.Resolve(ctx, w, s)
+}
+
+// ResolveLost carries out what the person chose about data the cloud lost.
+func (r *Runner) ResolveLost(ctx context.Context, id string, a LostAction) (LostResult, error) {
+	if a != LostAcceptCloud && a != LostReupload {
+		return LostResult{}, fmt.Errorf("%w %q", ErrBadLostAction, a)
+	}
+	if r.engine == nil {
+		return LostResult{}, ErrNoStore
+	}
+	w, err := r.find(id)
+	if err != nil {
+		return LostResult{}, err
+	}
+	r.pass.Lock() // don't race a sync pass
+	defer r.pass.Unlock()
+	return r.engine.ResolveLost(ctx, w, a)
 }
 
 // Snapshots lists a world's local snapshots, oldest first.

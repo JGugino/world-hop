@@ -95,6 +95,26 @@ func (s *Server) encryptionRoutes(mux *http.ServeMux) {
 		s.deps.Encryption.DismissRekey()
 		writeJSON(w, s.deps.Encryption.Info(r.Context()))
 	})
+	for _, name := range []string{"restore-key", "accept-key-rollback"} {
+		name := name
+		mux.HandleFunc("POST /api/encryption/"+name, func(w http.ResponseWriter, r *http.Request) {
+			if s.deps.Encryption == nil {
+				writeErr(w, http.StatusNotImplemented, errNoEncryption)
+				return
+			}
+			var err error
+			if name == "restore-key" {
+				err = s.deps.Encryption.RestoreKeyHeader(r.Context())
+			} else {
+				err = s.deps.Encryption.AcceptKeyRollback(r.Context())
+			}
+			if err != nil {
+				writeServiceErr(w, err)
+				return
+			}
+			writeJSON(w, s.deps.Encryption.Info(r.Context()))
+		})
+	}
 	for _, name := range []string{"lock", "disable"} {
 		name := name
 		mux.HandleFunc("POST /api/encryption/"+name, func(w http.ResponseWriter, r *http.Request) {

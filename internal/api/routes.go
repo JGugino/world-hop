@@ -60,6 +60,8 @@ type Encrypter interface {
 	StartChangePassphrase(ctx context.Context, current, next, confirm string, acknowledged, remember bool) error
 	CancelChangePassphrase()
 	DismissRekey()
+	RestoreKeyHeader(ctx context.Context) error
+	AcceptKeyRollback(ctx context.Context) error
 }
 
 var _ Encrypter = (*crypt.Manager)(nil)
@@ -216,6 +218,20 @@ func (s *Server) routes(mux *http.ServeMux) {
 			return
 		}
 		writeJSON(w, map[string]any{"used": res.Used, "copy": res.Copy})
+	})
+	mux.HandleFunc("POST /api/worlds/{id}/lost", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Action sync.LostAction `json:"action"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		res, err := s.svc.ResolveLost(r.Context(), r.PathValue("id"), body.Action)
+		if err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		writeJSON(w, res)
 	})
 	mux.HandleFunc("GET /api/worlds/{id}/snapshots", func(w http.ResponseWriter, r *http.Request) {
 		snaps, err := s.svc.Snapshots(r.PathValue("id"))
@@ -396,11 +412,15 @@ func (s *Server) routes(mux *http.ServeMux) {
 
 func writeServiceErr(w http.ResponseWriter, err error) {
 	var ce *sync.ConflictError
+	var le *sync.LostError
 	switch {
 	case errors.Is(err, sync.ErrUnknownWorld), errors.Is(err, sync.ErrNotInStore), errors.Is(err, ErrUnknownProvider), errors.Is(err, os.ErrNotExist):
 		writeErr(w, http.StatusNotFound, err)
-	case errors.Is(err, sync.ErrBadStrategy), errors.Is(err, sync.ErrBadTarget):
+	case errors.Is(err, sync.ErrBadStrategy), errors.Is(err, sync.ErrBadTarget), errors.Is(err, sync.ErrBadLostAction),
+		errors.Is(err, sync.ErrCannotAccept), errors.Is(err, sync.ErrNoLocalCopy):
 		writeErr(w, http.StatusBadRequest, err)
+	case errors.Is(err, sync.ErrNotLost):
+		writeErr(w, http.StatusConflict, err)
 	case errors.Is(err, crypt.ErrWrongPassphrase):
 		writeErr(w, http.StatusUnauthorized, err)
 	case errors.Is(err, crypt.ErrNotConfirmed), errors.Is(err, crypt.ErrWeakPassphrase),
@@ -408,7 +428,9 @@ func writeServiceErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, err)
 	case errors.Is(err, crypt.ErrRekeying):
 		writeErr(w, http.StatusConflict, err)
-	case errors.Is(err, crypt.ErrLocked), errors.Is(err, crypt.ErrPassphraseChanged):
+	case errors.Is(err, crypt.ErrNoSavedHeader):
+		writeErr(w, http.StatusBadRequest, err)
+	case errors.Is(err, crypt.ErrLocked), errors.Is(err, crypt.ErrPassphraseChanged), errors.Is(err, crypt.ErrKeyRollback):
 		writeErr(w, http.StatusLocked, err)
 	case errors.Is(err, license.ErrProRequired):
 		writeErr(w, http.StatusPaymentRequired, err)
@@ -422,7 +444,7 @@ func writeServiceErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusUnprocessableEntity, err)
 	case errors.Is(err, sync.ErrNoStore), errors.Is(err, ErrProviderUnavailable):
 		writeErr(w, http.StatusNotImplemented, err)
-	case errors.Is(err, sync.ErrWorldOpen), errors.Is(err, sync.ErrDestExists), errors.As(err, &ce):
+	case errors.Is(err, sync.ErrWorldOpen), errors.Is(err, sync.ErrDestExists), errors.As(err, &ce), errors.As(err, &le):
 		writeErr(w, http.StatusConflict, err)
 	default:
 		p := sync.Explain(err)

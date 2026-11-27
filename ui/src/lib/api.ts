@@ -42,6 +42,7 @@ export type WorldStatus =
 	| 'local-ahead'
 	| 'remote-ahead'
 	| 'conflict'
+	| 'cloud-lost'
 	| 'unknown';
 
 export type World = {
@@ -58,7 +59,25 @@ export type World = {
 	/** What to do about it, and the page where to do it. */
 	hint?: string;
 	fix?: string;
+	/** What the cloud lost, when status is 'cloud-lost'. */
+	lost?: Lost;
 };
+
+/** The cloud no longer holds what this computer last saw. */
+export type Lost = {
+	kind: 'versions' | 'world' | 'data';
+	/** Versions this computer had seen that are gone, and how many are still listed. */
+	versions: number;
+	remaining: number;
+	/** Packs found missing (0 when unknown). */
+	packs: number;
+	/** The cloud can be taken as it is now (not possible for missing data). */
+	canAccept: boolean;
+	/** This computer has a copy it can upload. */
+	canReupload: boolean;
+};
+
+export type LostAction = 'accept-cloud' | 'reupload';
 
 export type CloudWorld = {
 	id: string;
@@ -169,6 +188,12 @@ export const forceSync = () => call<Status>('POST', '/api/sync');
 export const getWorlds = () => call<World[]>('GET', '/api/worlds');
 export const syncWorld = (id: string) =>
 	call<Status>('POST', `/api/worlds/${encodeURIComponent(id)}/sync`);
+export const resolveLost = (id: string, action: LostAction) =>
+	call<{ action: LostAction; manifest?: string }>(
+		'POST',
+		`/api/worlds/${encodeURIComponent(id)}/lost`,
+		{ action }
+	);
 export const resolveConflict = (id: string, strategy: Strategy) =>
 	call<{ used: Strategy; copy?: string }>(
 		'POST',
@@ -226,6 +251,8 @@ export type Encryption = {
 	keyInStore: boolean | null;
 	/** Another computer changed the passphrase: enter the new one. */
 	keyChanged?: boolean;
+	/** The cloud's key header is older than the one this computer has used, or gone. */
+	keyRollback?: boolean;
 	/** A passphrase change running here, or its result until dismissed. */
 	rekey?: Rekey;
 	error?: string;
@@ -252,6 +279,8 @@ export const unlockEncryption = (passphrase: string, remember: boolean) =>
 	call<Encryption>('POST', '/api/encryption/unlock', { passphrase, remember });
 export const lockEncryption = () => call<Encryption>('POST', '/api/encryption/lock');
 export const disableEncryption = () => call<Encryption>('POST', '/api/encryption/disable');
+export const restoreKeyHeader = () => call<Encryption>('POST', '/api/encryption/restore-key');
+export const acceptKeyRollback = () => call<Encryption>('POST', '/api/encryption/accept-key-rollback');
 export const changePassphrase = (b: {
 	current: string;
 	passphrase: string;

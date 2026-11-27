@@ -22,6 +22,10 @@ var (
 	ErrLocked = store.ErrEncryptionLocked
 	// ErrPassphraseChanged: another computer changed the passphrase.
 	ErrPassphraseChanged = store.ErrPassphraseChanged
+	// ErrKeyRollback: the cloud's key header is older than the one used here.
+	ErrKeyRollback = store.ErrKeyRollback
+	// ErrNoSavedHeader: this computer has no copy of the key header to restore.
+	ErrNoSavedHeader = errors.New("this computer has no saved copy of the key header")
 	// ErrRekeying: a passphrase change is running on this computer.
 	ErrRekeying = store.ErrRekeying
 	// ErrProRequired: turning encryption on is a Pro feature.
@@ -71,6 +75,12 @@ type settings struct {
 	// written by another computer's passphrase change is noticed, even after a
 	// restart. Empty for settings saved by an earlier version.
 	KeyID string `json:"keyId,omitempty"`
+	// KeyGen and Header are the newest key header this computer has used. The
+	// header holds no secret (salt, cost, a check value). They let this computer
+	// notice that the cloud now shows an older one (rolled back or deleted) and
+	// offer to put it back.
+	KeyGen int64   `json:"keyGen,omitempty"`
+	Header *Header `json:"header,omitempty"`
 }
 
 // headerRecheck is how often an unlocked computer looks for a key header that
@@ -103,6 +113,8 @@ type Manager struct {
 	rekey       *Rekey
 	rekeyCancel context.CancelFunc
 	rekeyDone   chan struct{}
+
+	rollback bool // the cloud's key header is behind this computer's
 }
 
 func (m *Manager) now() time.Time {
@@ -161,20 +173,33 @@ func (m *Manager) current(ctx context.Context) (store.Store, error) {
 	if m.rekey != nil && m.rekey.State == RekeyRunning {
 		return nil, ErrRekeying
 	}
+	if m.rollback {
+		return nil, ErrKeyRollback
+	}
 	if m.enc != nil {
 		if m.now().Sub(m.checked) < headerRecheck {
 			return m.enc, nil
 		}
-		// Another computer may have changed the passphrase since. A failed
-		// look is not a reason to stop: the real request will say what is wrong.
-		if h, err := ReadHeader(ctx, m.Inner); err == nil && m.hdr != nil && h.Generation() > m.hdr.Generation() {
+		// Another computer may have changed the passphrase since, or the cloud
+		// may have lost the header. A failed look is not a reason to stop: the
+		// real request will say what is wrong.
+		h, err := ReadHeader(ctx, m.Inner)
+		switch {
+		case err == nil && m.hdr != nil && h.Generation() > m.hdr.Generation():
 			m.forget(m.hdr.ID())
 			return nil, ErrPassphraseChanged
+		case m.behind(h, err):
+			m.rollback = true
+			return nil, ErrKeyRollback
 		}
 		m.checked = m.now()
 		return m.enc, nil
 	}
 	h, err := ReadHeader(ctx, m.Inner)
+	if m.behind(h, err) {
+		m.rollback = true
+		return nil, ErrKeyRollback
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +221,19 @@ func (m *Manager) current(ctx context.Context) (store.Store, error) {
 	}
 	m.hdr, m.key, m.enc, m.checked = h, k, NewForGeneration(m.Inner, k, h.Generation()), m.now()
 	return m.enc, nil
+}
+
+// behind reports whether the key header the cloud shows (h, or err when it
+// shows none) is older than the newest this computer has used. The caller
+// holds m.mu.
+func (m *Manager) behind(h *Header, err error) bool {
+	if m.cfg.KeyGen < 1 {
+		return false // settings from an earlier version: nothing to compare
+	}
+	if errors.Is(err, ErrNoKey) {
+		return true
+	}
+	return err == nil && h.Generation() < m.cfg.KeyGen
 }
 
 // forget drops the key that no longer matches the store, including the copy
@@ -222,6 +260,9 @@ type Info struct {
 	KeyInStore *bool `json:"keyInStore"`
 	// KeyChanged: another computer changed the passphrase; enter the new one.
 	KeyChanged bool `json:"keyChanged,omitempty"`
+	// KeyRollback: the cloud's key header is older than the one this computer
+	// has used, or gone. Syncing is stopped until the person chooses.
+	KeyRollback bool `json:"keyRollback,omitempty"`
 	// Rekey is the passphrase change in progress or just finished, if any.
 	Rekey *Rekey `json:"rekey,omitempty"`
 	Error string `json:"error,omitempty"`
@@ -233,6 +274,7 @@ func (m *Manager) Info(ctx context.Context) Info {
 	m.mu.Lock()
 	in.Enabled, in.Remember = m.cfg.Enabled, m.cfg.Remember
 	in.Unlocked = m.enc != nil
+	in.KeyRollback = m.rollback
 	if m.rekey != nil {
 		r := *m.rekey
 		in.Rekey = &r
@@ -243,6 +285,8 @@ func (m *Manager) Info(ctx context.Context) Info {
 			in.Unlocked = true // key came from the keychain
 		} else if errors.Is(err, ErrPassphraseChanged) {
 			in.KeyChanged = true
+		} else if errors.Is(err, ErrKeyRollback) {
+			in.KeyRollback = true
 		} else if !errors.Is(err, ErrLocked) && !errors.Is(err, ErrRekeying) {
 			in.Error = err.Error()
 		}
@@ -317,6 +361,12 @@ func (m *Manager) Unlock(ctx context.Context, pass string, remember bool) error 
 		return ErrRekeying
 	}
 	h, err := ReadHeader(ctx, m.Inner)
+	m.mu.Lock()
+	rolledBack := m.behind(h, err)
+	m.mu.Unlock()
+	if rolledBack {
+		return ErrKeyRollback // never quietly accept an older key
+	}
 	if err != nil {
 		return err
 	}
@@ -338,7 +388,7 @@ func (m *Manager) set(h *Header, k *Key, remember bool) error {
 		m.Keys.Delete(h.ID())
 	}
 	prev := m.cfg
-	m.cfg = settings{Enabled: true, Remember: remember && m.Keys != nil, KeyID: h.ID()}
+	m.cfg = settings{Enabled: true, Remember: remember && m.Keys != nil, KeyID: h.ID(), KeyGen: h.Generation(), Header: h}
 	if err := m.save(); err != nil {
 		m.cfg = prev
 		return err
@@ -425,6 +475,19 @@ func (m *Manager) ListManifests(ctx context.Context, worldID string) ([]string, 
 		return nil, err
 	}
 	return s.ListManifests(ctx, worldID)
+}
+
+// MissingPacks implements store.PackChecker.
+func (m *Manager) MissingPacks(ctx context.Context, names []string) ([]string, error) {
+	s, err := m.current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	chk, ok := s.(store.PackChecker)
+	if !ok {
+		return nil, store.ErrUnsupported
+	}
+	return chk.MissingPacks(ctx, names)
 }
 
 func (m *Manager) ListWorlds(ctx context.Context) ([]string, error) {

@@ -415,6 +415,21 @@ func (s *Store) ListManifests(ctx context.Context, world string) ([]string, erro
 	return out, nil
 }
 
+// MissingPacks implements store.PackChecker with one listing of the packs.
+func (s *Store) MissingPacks(ctx context.Context, names []string) ([]string, error) {
+	keys, err := s.list(ctx, "packs/", 0, false)
+	if err != nil {
+		return nil, err
+	}
+	have := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		if n, ok := strings.CutPrefix(k, "packs/"); ok {
+			have[n] = true
+		}
+	}
+	return store.Missing(names, have), nil
+}
+
 func (s *Store) ListWorlds(ctx context.Context) ([]string, error) {
 	keys, err := s.list(ctx, "worlds/", 0, false)
 	if err != nil {
