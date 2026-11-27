@@ -9,11 +9,16 @@ import (
 	wsync "github.com/JGugino/world-hopper/internal/sync"
 )
 
-// Lazy starts a Server only when asked and shuts it down after it has been idle,
-// so the HTTP listener doesn't exist while the UI isn't in use.
 // closeGrace is how long after the page reports closing before the server stops.
+// It is short but not zero so a page reload (which also reports closing) doesn't
+// kill the server it is about to reconnect to.
 const closeGrace = 5 * time.Second
 
+// Lazy starts a Server only when asked and shuts it down after it has been idle,
+// so the HTTP listener doesn't exist while the UI isn't in use. Open Web View calls
+// Ensure; the server then stays up while the page keeps polling, and stops when the
+// page says it closed (after a short grace) or when no request arrives for the idle
+// timeout.
 type Lazy struct {
 	addr   string
 	svc    *wsync.Runner
@@ -27,6 +32,8 @@ type Lazy struct {
 	cur *Server
 }
 
+// NewLazy returns a Lazy that serves on addr ("127.0.0.1:0" picks a free port) and
+// stops a server idle for idle.
 func NewLazy(addr string, svc *wsync.Runner, assets fs.FS, deps Deps, idle time.Duration) *Lazy {
 	tick := idle / 4
 	if tick <= 0 {
@@ -66,6 +73,9 @@ func (l *Lazy) Running() bool {
 	return l.cur != nil
 }
 
+// watch stops the server once it has gone idle (no request at all) for the idle
+// period. The open page polls /api/status every few seconds, so only an abandoned
+// view ever times out.
 func (l *Lazy) watch(srv *Server) {
 	t := time.NewTicker(l.tick)
 	defer t.Stop()

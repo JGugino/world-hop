@@ -52,6 +52,7 @@ type Providers interface {
 // StubProviders lists Google Drive as not yet available.
 type StubProviders struct{}
 
+// List reports Google Drive as unavailable, with a note explaining why.
 func (StubProviders) List(context.Context) []Provider {
 	return []Provider{
 		{ID: "gdrive", Name: "Google Drive",
@@ -59,12 +60,15 @@ func (StubProviders) List(context.Context) []Provider {
 	}
 }
 
+// Link always fails: there is nothing to link in this mode.
 func (StubProviders) Link(_ context.Context, id string) (LinkStart, error) {
 	return LinkStart{}, stubErr(id)
 }
 
+// Unlink always fails: there is nothing to unlink in this mode.
 func (StubProviders) Unlink(_ context.Context, id string) error { return stubErr(id) }
 
+// stubErr returns the error for linking or unlinking in stub mode.
 func stubErr(id string) error {
 	if id == "gdrive" {
 		return ErrProviderUnavailable
