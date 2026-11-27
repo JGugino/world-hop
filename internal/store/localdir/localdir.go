@@ -83,6 +83,21 @@ func (d *Dir) PutPack(_ context.Context, name string, data []byte) error {
 	return nil
 }
 
+// MissingPacks implements store.PackChecker.
+func (d *Dir) MissingPacks(_ context.Context, names []string) ([]string, error) {
+	have := map[string]bool{}
+	for _, n := range names {
+		p, err := d.packPath(n)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(p); err == nil {
+			have[n] = true
+		}
+	}
+	return store.Missing(names, have), nil
+}
+
 func (d *Dir) GetPack(_ context.Context, name string) ([]byte, error) {
 	p, err := d.packPath(name)
 	if err != nil {

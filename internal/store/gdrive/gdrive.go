@@ -286,6 +286,21 @@ func (s *Store) GetManifest(ctx context.Context, world, name string) ([]byte, er
 }
 
 // ListWorlds finds every manifest in the app folder and groups them by world.
+// MissingPacks implements store.PackChecker with one listing of the packs.
+func (s *Store) MissingPacks(ctx context.Context, names []string) ([]string, error) {
+	fs, err := s.list(ctx, "appProperties has { key='kind' and value='pack' }")
+	if err != nil {
+		return nil, err
+	}
+	have := make(map[string]bool, len(fs))
+	for _, f := range fs {
+		if n, ok := strings.CutPrefix(f.Name, "packs/"); ok {
+			have[n] = true
+		}
+	}
+	return store.Missing(names, have), nil
+}
+
 func (s *Store) ListWorlds(ctx context.Context) ([]string, error) {
 	fs, err := s.list(ctx, "appProperties has { key='kind' and value='manifest' }")
 	if err != nil {

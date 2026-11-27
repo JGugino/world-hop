@@ -354,6 +354,33 @@ func (s *Store) GetPack(ctx context.Context, name string) ([]byte, error) {
 	return s.open(blob, "pack", name)
 }
 
+// MissingPacks implements store.PackChecker: names are the plaintext pack names
+// the engine knows; the inner store holds them under keyed names.
+func (s *Store) MissingPacks(ctx context.Context, names []string) ([]string, error) {
+	chk, ok := s.Inner.(store.PackChecker)
+	if !ok {
+		return nil, store.ErrUnsupported
+	}
+	inner := make([]string, len(names))
+	byInner := make(map[string]string, len(names))
+	for i, n := range names {
+		if !store.ValidPackName(n) {
+			return nil, fmt.Errorf("crypt: bad pack name")
+		}
+		inner[i] = s.packName(n)
+		byInner[inner[i]] = n
+	}
+	miss, err := chk.MissingPacks(ctx, inner)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(miss))
+	for _, m := range miss {
+		out = append(out, byInner[m])
+	}
+	return out, nil
+}
+
 type indexEntry struct {
 	WorldID string `json:"worldId"`
 }

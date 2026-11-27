@@ -275,3 +275,61 @@ func TestPickFolderEndpoint(t *testing.T) {
 		t.Fatalf("got %d", w.Code)
 	}
 }
+
+func TestLostWorldAPI(t *testing.T) {
+	dir := t.TempDir()
+	shared := filepath.Join(dir, "shared")
+	wp := filepath.Join(dir, "saves", "W1")
+	os.MkdirAll(wp, 0o755)
+	os.WriteFile(filepath.Join(wp, "level.dat"), []byte("data"), 0o644)
+	eng, err := sync.New(localdir.New(shared), filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := sync.NewRunner("t", eng, func() []worlds.World {
+		return worlds.Discover([]worlds.Root{{Launcher: "t", Path: filepath.Join(dir, "saves")}})
+	})
+	h := (&Server{svc: svc, deps: Deps{}, assets: fstest.MapFS{"index.html": {Data: []byte("hi")}}}).Handler()
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Host = "127.0.0.1:1"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	svc.ForceSync(context.Background()) // uploads W1
+
+	const lost = "/api/worlds/W1/lost"
+	if w := do("POST", lost, `{"action":"accept-cloud"}`); w.Code != 409 {
+		t.Fatalf("nothing lost: %d %s", w.Code, w.Body)
+	}
+	if w := do("POST", lost, `{"action":"heal"}`); w.Code != 400 {
+		t.Fatalf("bad action: %d %s", w.Code, w.Body)
+	}
+
+	os.RemoveAll(filepath.Join(shared, "worlds")) // the cloud loses the world
+	w := do("GET", "/api/worlds", "")
+	var list []struct {
+		Status string
+		Lost   *sync.LostInfo
+	}
+	json.Unmarshal(w.Body.Bytes(), &list)
+	if len(list) != 1 || list[0].Status != "cloud-lost" || list[0].Lost == nil || list[0].Lost.Kind != sync.LostWorld || !list[0].Lost.CanReupload {
+		t.Fatalf("worlds: %s", w.Body)
+	}
+	if w := do("POST", "/api/worlds/W1/sync", ""); !strings.Contains(w.Body.String(), "cloud-lost") {
+		t.Fatalf("the sync result must report it: %s", w.Body)
+	}
+	if _, err := os.Stat(filepath.Join(shared, "worlds")); err == nil {
+		t.Fatal("a sync re-uploaded by itself")
+	}
+	if w := do("POST", lost, `{"action":"reupload"}`); w.Code != 200 || !strings.Contains(w.Body.String(), "manifest-") {
+		t.Fatalf("reupload: %d %s", w.Code, w.Body)
+	}
+	if w := do("GET", "/api/worlds", ""); !strings.Contains(w.Body.String(), `"status":"synced"`) {
+		t.Fatalf("after reupload: %s", w.Body)
+	}
+	if w := do("POST", "/api/worlds/nope/lost", `{"action":"reupload"}`); w.Code != 404 {
+		t.Fatalf("unknown world: %d", w.Code)
+	}
+}

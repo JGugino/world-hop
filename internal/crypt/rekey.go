@@ -305,7 +305,7 @@ func (m *Manager) runRekey(ctx context.Context, oldHdr *Header, oldKey, newKey *
 			m.Keys.Delete(newHdr.ID())
 		}
 	}
-	m.cfg = settings{Enabled: true, Remember: remember && m.Keys != nil, KeyID: newHdr.ID()}
+	m.cfg = settings{Enabled: true, Remember: remember && m.Keys != nil, KeyID: newHdr.ID(), KeyGen: newHdr.Generation(), Header: newHdr}
 	m.save()
 	m.hdr, m.key, m.enc, m.checked = newHdr, newKey, NewForGeneration(m.Inner, newKey, newHdr.Generation()), m.now()
 	return nil

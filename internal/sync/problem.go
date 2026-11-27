@@ -22,6 +22,7 @@ import (
 const (
 	ProblemWorldOpen    = "world-open"
 	ProblemConflict     = "conflict"
+	ProblemCloudLost    = "cloud-lost"
 	ProblemOffline      = "offline"
 	ProblemAuth         = "auth"
 	ProblemNotLinked    = "not-linked"
@@ -76,6 +77,7 @@ func Explain(err error) Problem {
 
 func explain(err error) Problem {
 	var ce *ConflictError
+	var le *LostError
 	var he *httpx.StatusError
 	var s3e *s3.Error
 	switch {
@@ -87,6 +89,17 @@ func explain(err error) Problem {
 		return Problem{Kind: ProblemConflict, Level: LevelWarn,
 			Title:  "This world changed on two computers",
 			Action: "Open the world on the Worlds tab and choose which version to keep. Nothing was overwritten.",
+			Fix:    "/"}
+	case errors.As(err, &le):
+		title := "Your cloud has lost versions of this world"
+		switch le.Kind {
+		case LostWorld:
+			title = "This world is no longer in your cloud"
+		case LostData:
+			title = "Your cloud is missing data this world needs"
+		}
+		return Problem{Kind: ProblemCloudLost, Level: LevelWarn, Title: title,
+			Action: "Open the world on the Worlds tab and choose what to do. WorldHop has changed nothing and won't until you decide.",
 			Fix:    "/"}
 	case errors.Is(err, license.ErrWorldLimit):
 		return Problem{Kind: ProblemLimit, Level: LevelWarn,
@@ -112,6 +125,11 @@ func explain(err error) Problem {
 		return Problem{Kind: ProblemBusy, Level: LevelInfo,
 			Title:  "Your encryption passphrase is being changed",
 			Action: "Syncing resumes by itself when the change finishes. Watch its progress on the Encryption tab.",
+			Fix:    "/encryption"}
+	case errors.Is(err, store.ErrKeyRollback):
+		return Problem{Kind: ProblemKey, Level: LevelWarn,
+			Title:  "The encryption key in your cloud is older than the one this computer has used",
+			Action: "Something removed or rolled back the key. Open the Encryption tab to choose what to do. Nothing was changed.",
 			Fix:    "/encryption"}
 	case errors.Is(err, store.ErrPassphraseChanged):
 		return Problem{Kind: ProblemLocked, Level: LevelWarn,

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/JGugino/world-hopper/internal/chunker"
@@ -29,6 +30,16 @@ func Contract(t *testing.T, s store.Store) {
 	got, err := s.GetPack(ctx, pack)
 	if err != nil || !bytes.Equal(got, data) {
 		t.Fatalf("GetPack roundtrip: %v", err)
+	}
+	if chk, ok := s.(store.PackChecker); ok { // optional: says which packs are gone
+		absent := strings.Repeat("0", 64)
+		switch miss, err := chk.MissingPacks(ctx, []string{pack, absent}); {
+		case errors.Is(err, store.ErrUnsupported):
+		case err != nil:
+			t.Fatalf("MissingPacks: %v", err)
+		case len(miss) != 1 || miss[0] != absent:
+			t.Fatalf("MissingPacks = %v, want only the absent pack", miss)
+		}
 	}
 	if err := s.PutPack(ctx, "../evil", data); err == nil {
 		t.Fatal("bad pack name accepted")

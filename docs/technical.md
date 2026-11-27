@@ -84,11 +84,13 @@ By default (`!webview` build tag) the UI opens in the default browser: `rundll32
 | `GET/POST /api/sources`, `POST /api/sources/remove` | List, add, remove sources |
 | `POST /api/pick-folder` | Native folder dialog |
 | `GET /api/worlds`, `POST /api/worlds/{id}/sync`, `/resolve` | World list, per-world sync, conflict resolution |
+| `POST /api/worlds/{id}/lost` | Choose what to do about data the cloud lost (`accept-cloud` or `reupload`) |
 | `GET /api/worlds/{id}/snapshots`, `POST /api/worlds/{id}/restore` | Snapshots and restore |
 | `GET /api/cloud-worlds`, `POST /api/cloud-worlds/{id}/download` | Worlds that exist only in the cloud |
 | `GET /api/providers`, `POST /api/providers/{id}/link` and `/unlink` | Cloud accounts |
 | `GET/PUT /api/s3`, `POST /api/s3/test` | S3 settings (Pro) |
 | `GET /api/encryption`, `POST /api/encryption/enable`, `/unlock`, `/lock`, `/disable` | Encryption |
+| `POST /api/encryption/restore-key`, `/accept-key-rollback` | Choose what to do when the cloud's key header is older than the one used here, or gone |
 | `POST /api/encryption/change-passphrase`, `/change-passphrase/cancel`, `/change-passphrase/dismiss` | Start (202), stop, or clear the result of a passphrase change; progress is `rekey` in `GET /api/encryption` |
 | `GET /api/license`, `POST /api/license/activate`, `/deactivate`, `/free-world` | Licensing |
 
@@ -135,6 +137,7 @@ Each device remembers, per world, the manifest it last synced with and its tree 
 | `local-ahead` | Local changes to push |
 | `remote-ahead` | Newer stored version to pull |
 | `conflict` | Local and stored versions diverged, or several heads |
+| `cloud-lost` | The cloud no longer holds what this computer last saw (see 3.10) |
 
 `Sync` looks once and does what the status calls for. Conflicts are reported, never overwritten. `Resolve` offers four strategies: `keep-local` (uploaded as a new version superseding all heads), `keep-remote` (a merge manifest is written when there are several heads, then the stored version is applied), `keep-newest` (whichever was modified last) and `keep-both` (local copied to `<world> (conflict copy <date time>)`, then stored wins).
 
@@ -167,6 +170,21 @@ Force Sync (tray or UI) runs a pass immediately. The `Runner` runs one pass at a
 ### 3.9 Status and problems
 
 `GET /api/status` returns state (`idle`/`syncing`), last sync time and result, an outcome (`ok`, `waiting`, `attention`, `error`), counts (total, uploaded, downloaded, up to date), progress (`checking`, `uploading`, `downloading`) and a list of problems. Errors are mapped to plain-language problems of these kinds: world open, conflict, free-world limit, Pro required, no cloud account, authorization lost, encryption locked, key problem, damaged data, stopped, disk full, permission, offline, server, unknown. The tray tooltip follows the headline every 2 seconds.
+
+### 3.10 Missing or rolled-back cloud data
+
+The provider is not trusted to keep what it was given, and the app never repairs anything by itself. Every computer already keeps each version of a world it has seen (the manifest cache, which includes the versions it pushed). `Engine.heads`, which every operation goes through, compares that set with the cloud's listing. A saved version the cloud no longer lists means it was deleted or rolled back (`LostVersions`; `LostWorld` when nothing is listed any more). Without this check a rolled-back cloud looked like "a newer version in the cloud" and pulled an older version over the world, and a deleted world was quietly uploaded again.
+
+A second check covers data: before a push builds on chunks stored by earlier versions, `store.PackChecker` (implemented by the local folder, Drive and S3 stores with one listing, and by the encryption layers by translating names) says which of those packs still exist, and a pull that finds a pack missing reports it too (`LostData`). A manifest is never written that points at missing data, and a half-built world is never left behind.
+
+When something is missing, the world's status is `cloud-lost`, no push, pull or resolution runs, and the problem is `cloud-lost` (a warning with the world's name). The Worlds tab shows what is missing and offers two actions, each behind a confirmation (`POST /api/worlds/{id}/lost`, `Engine.ResolveLost`):
+
+- **`accept-cloud`** ("use the cloud as it is now"): forget the missing versions (their cached copies, and the "last synced" record if it points at one). The world is then judged like any other: a copy that differs from what is left in the cloud is a **conflict** for the person to settle, not a quiet revert. It is not offered for missing data.
+- **`reupload`** ("upload this computer's copy"): uploads the local world as a new version whose parents are the versions still listed and whose generation is past every generation this computer has seen (so it can't collide with one the cloud only hid). Chunks in missing packs are uploaded again; after a data loss nothing stored is reused.
+
+The key header is covered the same way (section 5): this computer saves the newest header it has used and stops if the cloud shows an older one or none (`ErrKeyRollback`), offering to put its copy back or to go by the cloud.
+
+Limits: a computer that never saw a version cannot miss it, so a brand-new computer, or one whose state folder was deleted, detects nothing, and a rollback to a state no computer saw is invisible. Any computer that has seen the lost version notices. Packs are checked when something is pushed or pulled, not on every pass, so a world that is up to date on every computer may not notice lost packs until it next changes. The same warning appears when a different cloud account is connected or WorldHop's data was cleared in the cloud on purpose; the person's choice settles it.
 
 ## 4. Cloud providers
 
@@ -205,6 +223,8 @@ Not implemented. An earlier build had a Dropbox store; the product decision is G
 **Changing the passphrase:** every key comes from the passphrase and a salt, so a new passphrase means a new key and, because names are derived from the key, a new layout beside the old one. `Manager.StartChangePassphrase` (`internal/crypt/rekey.go`) verifies the current passphrase, then re-encrypts in the background: every world's manifests, and the packs of each world's newest versions, are read through the old key and written through the new one (packs first, then manifests), looping until a pass finds nothing new so versions another computer pushes meanwhile are carried over. **Writing the next key header generation is the commit point** (`manifest-<generation>-key.json`; the newest generation is the key in force, and older headers are left as they were). Until then no other computer sees any of it, so a cancelled, failed or interrupted change leaves only unused data. An unfinished attempt is remembered in `rekey.json` (the salt and the generation it replaces, no secret) so a retry with the same new passphrase reuses the salt and finds the data already copied. Manifest names are the same in both layouts, so each computer's "last synced" record stays valid and nothing looks like a conflict. Each key generation has its own index of worlds (`_worldhop-index`, then `_worldhop-index-g2`, ...), because entries sealed with one key cannot be opened with another. While a change runs, store calls from this computer return `ErrRekeying` (shown as an informational "being changed" problem), and Lock, Disable and a second change are refused. The change is not a Pro feature, and works from a locked state, since it only maintains data that is already encrypted.
 
 Other computers find out by comparing the newest key header's generation with the one they unlocked: an unlocked computer checks at most once a minute, and a locked or restarted one compares the header with the `keyId` saved in `encryption.json`. Either way it drops its key (also from the keychain) and reports `ErrPassphraseChanged`, and the Encryption tab asks for the new passphrase. The previous encrypted copy cannot be removed by WorldHop (the store has no delete); it stays readable with the old passphrase until the user deletes it with the provider. Packs of versions older than each world's newest are not carried over, so that history exists only in the old copy.
+
+**Key header rollback:** the newest key header this computer used (generation and the header itself, which holds no secret) is saved in `encryption.json`. If the cloud later shows an older header, or none, `ErrKeyRollback` stops syncing, and the Encryption tab offers `restore-key` (write the saved copy back; it fails if the provider is only hiding the header) or `accept-key-rollback` (forget the newer key and go by what the cloud shows; with no header at all, encryption is turned off here so a new key can be made). Unlocking with an older header is refused until then. Settings saved by an earlier version have nothing to compare, so they are never flagged.
 
 **Second computer:** enable encryption and enter the same passphrase. The key header is found in the account, the passphrase is verified, and worlds appear. Creating a new key needs the passphrase twice and an explicit acknowledgement that a lost passphrase cannot be recovered.
 
@@ -313,7 +333,7 @@ Unit and integration tests live beside each package. `internal/store/storetest` 
 From the code and docs:
 
 - A passphrase change copies the data to a new layout; the old encrypted copy stays in the cloud (no delete) and older versions' packs are not carried over. Another computer that syncs while a change runs can push into the old layout after the last catch-up pass; that version stays in the old copy, and that computer sees a local change to upload (or a conflict to resolve) after it unlocks.
-- A provider can still delete data or roll a world back to an older manifest. Encryption detects modification, not rollback or deletion.
+- Deletion and rollback are detected only by a computer that had seen what is missing, and lost packs only when something is pushed or pulled (see 3.10). Encryption detects modification of what is stored; a provider can still delete data, and the app can warn but cannot prevent or undo it.
 - No cloud cleanup: old manifests and packs are never deleted (the store has no delete), so cloud usage only grows. The app cannot remove a plaintext copy after encryption is enabled.
 - Snapshots are local only (newest 5 per world).
 - No code signing (Windows SmartScreen warning) and no macOS notarization. No MSI or AppImage.

@@ -87,6 +87,7 @@ The **Worlds** tab shows each world and its state:
 | Changes to upload | This computer has newer changes. |
 | Newer version in the cloud | Another computer uploaded newer changes. |
 | Conflict | Two computers changed the world separately. |
+| Cloud data missing | Your cloud no longer holds something this computer had seen (deleted or rolled back). Nothing is synced or changed until you choose. See section 8. |
 
 ![Worlds tab](c-worlds.png)
 
@@ -117,6 +118,17 @@ This happens when you play on two computers without syncing in between. WorldHop
 | **Keep remote** | Use the cloud version. A snapshot of yours is saved first. |
 | **Keep newest** | Use whichever was changed most recently. |
 | **Keep both** | Copy this version to a new folder named `<world> (conflict copy <date>)`, then use the cloud version. |
+
+### If your cloud lost data
+
+If something in your cloud was deleted, or your cloud was rolled back to an older state, WorldHop notices (on any computer that had already seen what is missing). That world shows **Cloud data missing** and is left alone: WorldHop changes nothing, here or in the cloud, until you choose.
+
+| Choice | Result |
+|---|---|
+| **Use the cloud as it is now** | Forget the missing history and go by what the cloud holds. If this computer's version differs from what is left, you get the usual conflict choices, and nothing is replaced until you pick. If the world is gone from the cloud entirely, the next sync uploads this computer's copy. |
+| **Upload this computer's copy** | Upload this computer's world as a new version, rebuilding what the cloud lost. This is the only way to repair missing data, and needs a computer that has the world. |
+
+This warning also appears if you connected a different cloud account, or cleared WorldHop's data in your cloud yourself. Choosing **Use the cloud as it is now** settles it. A brand-new computer can't tell, because it has never seen the old versions.
 
 ### Snapshots
 
@@ -192,6 +204,8 @@ When a newer version is available, WorldHop shows a notice with a link to the do
 | Pro stopped working | Open **License**. If you were offline for a long time, connect to the internet so WorldHop can re-check. |
 | "Encryption is on but locked" | Enter your passphrase on the **Encryption** tab. If it says the passphrase was changed on another computer, enter the new one. |
 | "Your encryption passphrase is being changed" | A passphrase change is running on this computer. Syncing resumes when it finishes; watch the **Encryption** tab. |
+| "Cloud data missing" on a world | Something your cloud held is gone or rolled back. Read the explanation under the world and choose (section 8). Nothing changes until you do. |
+| "Encryption key looks rolled back" | The key in your cloud is older than the one this computer used. On the **Encryption** tab, put the key back from this computer, or go by what the cloud shows. |
 | Two computers show a conflict | Choose a resolution (section 8). Nothing is overwritten until you do. |
 | A world looks wrong after a sync | Close Minecraft and restore an earlier snapshot (section 8). |
 

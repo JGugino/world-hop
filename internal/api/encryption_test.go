@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/JGugino/world-hopper/internal/crypt"
 	"github.com/JGugino/world-hopper/internal/store/localdir"
@@ -115,5 +117,52 @@ func TestChangePassphraseAPI(t *testing.T) {
 	}
 	if w := do("/api/encryption/unlock", `{"passphrase":"another long passphrase"}`); w.Code != 200 {
 		t.Fatalf("new passphrase: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestKeyRollbackAPI(t *testing.T) {
+	dir := t.TempDir()
+	shared := filepath.Join(dir, "shared")
+	m, err := crypt.NewManager(localdir.New(shared), dir, nil, func() bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Params = crypt.Params{Time: 1, MemKiB: 64, Threads: 1}
+	now := time.Now()
+	m.Now = func() time.Time { return now }
+	eng, _ := sync.New(m, filepath.Join(dir, "state"))
+	svc := sync.NewRunner("t", eng, func() []worlds.World { return nil })
+	h := (&Server{svc: svc, deps: Deps{Encryption: m}, assets: fstest.MapFS{"index.html": {Data: []byte("hi")}}}).Handler()
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Host = "127.0.0.1:1"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	do("POST", "/api/encryption/enable", `{"passphrase":"correct horse battery","confirm":"correct horse battery","acknowledged":true}`)
+	hdr := filepath.Join(shared, "worlds", "_worldhop-key", "manifest-000000000001-key.json")
+	os.Remove(hdr)
+	now = now.Add(time.Hour)
+	if _, err := m.ListWorlds(context.Background()); err == nil {
+		t.Fatal("rollback not noticed")
+	}
+	if w := do("GET", "/api/encryption", ""); !strings.Contains(w.Body.String(), `"keyRollback":true`) {
+		t.Fatalf("info: %s", w.Body)
+	}
+	if w := do("POST", "/api/encryption/unlock", `{"passphrase":"correct horse battery"}`); w.Code != 423 {
+		t.Fatalf("unlock while rolled back: %d %s", w.Code, w.Body)
+	}
+	if w := do("POST", "/api/encryption/restore-key", ""); w.Code != 200 || strings.Contains(w.Body.String(), `"keyRollback":true`) {
+		t.Fatalf("restore: %d %s", w.Code, w.Body)
+	}
+	if _, err := os.Stat(hdr); err != nil {
+		t.Fatal("the header was not put back")
+	}
+	os.Remove(hdr)
+	now = now.Add(time.Hour)
+	m.ListWorlds(context.Background())
+	if w := do("POST", "/api/encryption/accept-key-rollback", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"enabled":false`) {
+		t.Fatalf("accept: %d %s", w.Code, w.Body)
 	}
 }

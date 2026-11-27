@@ -9,6 +9,8 @@
 		changePassphrase,
 		cancelChangePassphrase,
 		dismissChangePassphrase,
+		restoreKeyHeader,
+		acceptKeyRollback,
 		type Encryption
 	} from '$lib/api';
 
@@ -29,6 +31,7 @@
 	let newAck = $state(false);
 	let newRemember = $state(false);
 	let confirmCancel = $state(false);
+	let confirmAccept = $state(false);
 
 	const rekey = $derived(enc?.rekey);
 	const running = $derived(rekey?.state === 'running');
@@ -104,6 +107,37 @@
 </script>
 
 {#if error}<p class="bad">{error}</p>{/if}
+
+{#if enc?.keyRollback}
+	<section class="card fail" aria-live="polite">
+		<h2>Your cloud’s encryption key looks rolled back</h2>
+		<p class="bad">
+			The encryption key in your cloud account is older than the one this computer has used, or it is
+			gone. Syncing is stopped. Something removed or rolled back that part of your cloud.
+		</p>
+		<p class="muted small">
+			WorldHop has changed nothing and won’t until you choose. The key information holds no secret, and this
+			computer kept a copy of it.
+		</p>
+		<div class="row">
+			<button disabled={busy} onclick={() => run(restoreKeyHeader)}>Put the key back from this computer</button>
+			{#if confirmAccept}
+				<button class="danger" disabled={busy} onclick={() => run(acceptKeyRollback)}>Yes, go by the cloud</button>
+				<button class="secondary" onclick={() => (confirmAccept = false)}>Cancel</button>
+			{:else}
+				<button class="secondary" disabled={busy} onclick={() => (confirmAccept = true)}>Go by what the cloud shows…</button>
+			{/if}
+		</div>
+		<ul class="small muted">
+			<li><b>Put the key back:</b> writes this computer’s saved copy of the newest key back to your cloud. Nothing else is touched.</li>
+			<li>
+				<b>Go by what the cloud shows:</b> this computer forgets its newer key and uses whatever the cloud holds now, and you
+				enter a passphrase again. Data written under the newer key stays in the cloud but can’t be read here. If the cloud has no key at
+				all, encryption is turned off on this computer so you can set up a new one.
+			</li>
+		</ul>
+	</section>
+{/if}
 
 {#if rekey}
 	<section class="card" class:fail={rekey.state === 'failed'} aria-live="polite">

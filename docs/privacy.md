@@ -4,9 +4,9 @@ title: WorldHop Privacy Policy
 
 # WorldHop Privacy Policy
 
-**Effective date:** [EFFECTIVE DATE: set when published]
+**Effective date:** November 26, 2026
 **Operator:** Gugino Software Solutions ("we", "us")
-**Contact:** [CONTACT EMAIL: replace before publishing]
+**Contact:** gugino@gugino.org
 
 WorldHop is a desktop app that syncs your Minecraft worlds between your own computers using
 your own cloud storage. This policy explains what the app does with data. The short version:
@@ -120,6 +120,6 @@ repository. The history is public in the repository.
 
 ## 9. Contact
 
-Questions or requests: [CONTACT EMAIL: replace before publishing].
+Questions or requests: gugino@gugino.org.
 
 *This document is not legal advice.*

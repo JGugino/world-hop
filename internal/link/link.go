@@ -423,6 +423,20 @@ func (m *Manager) ListManifests(ctx context.Context, world string) ([]string, er
 	return l, m.wrap(id, err)
 }
 
+// MissingPacks implements store.PackChecker.
+func (m *Manager) MissingPacks(ctx context.Context, names []string) ([]string, error) {
+	s, id, err := m.current()
+	if err != nil {
+		return nil, err
+	}
+	chk, ok := s.(store.PackChecker)
+	if !ok {
+		return nil, store.ErrUnsupported
+	}
+	miss, err := chk.MissingPacks(ctx, names)
+	return miss, m.wrap(id, err)
+}
+
 func (m *Manager) ListWorlds(ctx context.Context) ([]string, error) {
 	s, id, err := m.current()
 	if err != nil {
