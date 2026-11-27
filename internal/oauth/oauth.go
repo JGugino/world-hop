@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"net"
 	"net/http"
 	"net/url"
@@ -58,6 +57,7 @@ func randString(n int) string {
 
 // Flow runs one authorization.
 type Flow struct {
+	Name    string // provider name for the browser page ("Google Drive"); optional
 	Config  Config
 	HTTP    *http.Client
 	Timeout time.Duration // how long to wait for the user (default 5 minutes)
@@ -75,6 +75,12 @@ type Pending struct {
 	srv      *http.Server
 	result   chan result
 	cancel   context.CancelFunc
+
+	mu       stdsync.Mutex
+	seen     bool // the browser reached the callback
+	final    bool
+	out      Outcome
+	fallback *time.Timer
 }
 
 type result struct {
@@ -121,29 +127,46 @@ func (f *Flow) Start() (*Pending, error) {
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		qs := r.URL.Query()
 		if qs.Get("state") != state {
-			http.Error(w, "unexpected state", http.StatusBadRequest)
-			return // ignore stray requests; keep waiting for the real redirect
+			// Not part of this attempt: say so, and keep waiting for the real redirect.
+			p.writePage(w, http.StatusBadRequest, describe(KindStale, f.Name, ""))
+			return
 		}
 		var res result
 		switch {
 		case qs.Get("error") != "":
-			res.err = fmt.Errorf("oauth: provider returned %q", qs.Get("error"))
+			res.err = providerError(qs.Get("error"), qs.Get("error_description"))
 		case qs.Get("code") == "":
-			res.err = errors.New("oauth: redirect had no code")
+			res.err = fail(KindIncomplete, "", "oauth: redirect had no code")
 		default:
-			res.code = qs.Get("code")
+			if miss := missingScopes(f.Config.Scopes, qs.Get("scope")); len(miss) > 0 {
+				res.err = fail(KindPermission, "not granted: "+strings.Join(miss, " "),
+					"oauth: permission not granted: %s", strings.Join(miss, " "))
+			} else {
+				res.code = qs.Get("code")
+			}
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		p.mu.Lock()
+		p.seen = true
+		p.mu.Unlock()
 		if res.err != nil {
-			fmt.Fprintf(w, "<h2>Could not connect</h2><p>%s</p>", html.EscapeString(res.err.Error()))
-		} else {
-			fmt.Fprint(w, "<h2>Connected</h2><p>You can close this tab and return to WorldHop.</p>")
+			kind, detail := kindOf(res.err)
+			p.finalize(kind, detail)
 		}
 		select {
 		case p.result <- res:
 		default:
 		}
+		p.writePage(w, http.StatusOK, p.outcome())
 	})
+	mux.HandleFunc("/callback/result", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") != state {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		p.writeResult(w)
+	})
+	mux.HandleFunc("/callback/assets/font.woff2", serveAsset("page/font.woff2", "font/woff2"))
+	mux.HandleFunc("/callback/assets/icon.svg", serveAsset("page/icon.svg", "image/svg+xml"))
 	p.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go p.srv.Serve(ln)
 	return p, nil
@@ -155,13 +178,14 @@ func (p *Pending) Cancel() {
 	case p.result <- result{err: context.Canceled}:
 	default:
 	}
-	p.srv.Close()
+	p.finalize(KindCancelled, "")
 }
 
-// Wait blocks until the redirect arrives (or timeout/ctx end), exchanges the
-// code and returns the token. It always closes the listener.
+// Wait blocks until the redirect arrives (or timeout/ctx end) and exchanges the
+// code for a token. The listener stays up until the browser page has been told
+// how it ended: call Saved once the token is stored (a failed Wait needs no
+// further call).
 func (p *Pending) Wait(ctx context.Context) (Token, error) {
-	defer p.srv.Close()
 	timeout := p.f.Timeout
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
@@ -172,17 +196,32 @@ func (p *Pending) Wait(ctx context.Context) (Token, error) {
 	select {
 	case res = <-p.result:
 	case <-ctx.Done():
-		return Token{}, fmt.Errorf("oauth: timed out waiting for authorization: %w", ctx.Err())
+		err := fmt.Errorf("oauth: timed out waiting for authorization: %w", ctx.Err())
+		p.finalize(KindTimeout, "")
+		return Token{}, err
 	}
 	if res.err != nil {
+		kind, detail := kindOf(res.err)
+		p.finalize(kind, detail)
 		return Token{}, res.err
 	}
-	return exchange(ctx, p.f.HTTP, p.f.Config, url.Values{
+	tok, err := exchange(ctx, p.f.HTTP, p.f.Config, url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {res.code},
 		"redirect_uri":  {p.redirect},
 		"code_verifier": {p.verifier},
 	}, "")
+	if err != nil {
+		kind, detail := kindOf(err)
+		p.finalize(kind, detail)
+		return Token{}, err
+	}
+	p.mu.Lock()
+	if !p.final {
+		p.fallback = time.AfterFunc(savedFallback, func() { p.finalize(KindSuccess, "") })
+	}
+	p.mu.Unlock()
+	return tok, nil
 }
 
 type tokenResp struct {
