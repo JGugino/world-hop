@@ -64,6 +64,23 @@ nothing; starting again with the same new passphrase picks up where it left off.
   one was exposed, delete the old copy with your provider.
 - It is not a Pro feature and works while locked, so a lapsed license never strands your data.
 
+## If the cloud rolls back or deletes things
+
+WorldHop never repairs by itself; it warns, stops that world (or encryption) and asks.
+
+- **Worlds.** If your cloud no longer holds versions of a world this computer had seen (deleted
+  or rolled back), the world shows "Cloud data missing" and is not synced. Choose **Use the cloud
+  as it is now** (forget the missing history; any difference from this computer's copy then
+  appears as a normal conflict you settle) or **Upload this computer's copy** (rebuild what the
+  cloud lost). Data a stored version needs that has gone missing can only be rebuilt from a
+  computer that has the world. This also appears if you connected a different cloud account.
+- **The key.** If the encryption key in your cloud is older than the one this computer has used,
+  or gone, syncing stops. **Put the key back** writes this computer's saved copy back (it holds
+  no secret). **Go by what the cloud shows** forgets the newer key here and asks for a
+  passphrase again; data written under the newer key stays in the cloud but can't be read here.
+- A computer can only notice what it has seen: a brand-new computer detects nothing, and data is
+  checked when a world is uploaded or downloaded.
+
 ## Remembering the passphrase
 
 Off by default. If the user opts in, the derived key (not the passphrase) is put in the OS
@@ -80,6 +97,8 @@ encrypted worlds keep syncing, so data is never stranded behind a license check.
 
 - Removing the old copy after a passphrase change: the store has no delete, so that is done with
   the provider.
-- A provider can still delete data or roll a world back to an older manifest; encryption
-  protects privacy and detects modification, not availability.
+- A provider can still delete data or roll a world back; encryption protects privacy and
+  detects modification, not availability. WorldHop notices missing or rolled-back data on any
+  computer that had seen it, and stops until you choose (see below), but it cannot prevent or
+  undo it.
 - Metadata listed under "Still visible" above.
