@@ -1,6 +1,8 @@
 // Package httpx holds the HTTP plumbing shared by the cloud stores: retry with
 // backoff on throttling and server errors, and bearer auth with one refresh
-// retry on 401.
+// retry on 401. Google Drive, S3, the OAuth token endpoint and the license check all
+// go through here (or follow the same rules), so network flakiness is handled in one
+// place and the stores can assume a request either succeeds or fails for a real reason.
 package httpx
 
 import (
@@ -26,6 +28,7 @@ type StatusError struct {
 	Body string
 }
 
+// Error formats the status and body for logs.
 func (e *StatusError) Error() string { return fmt.Sprintf("http %d: %s", e.Code, e.Body) }
 
 // NewTransport returns a transport for talking to one cloud provider with
@@ -45,15 +48,24 @@ var Shared = &http.Client{Transport: NewTransport()}
 
 // Tunables, variables so tests can run fast.
 var (
+	// MaxAttempts, BaseDelay and MaxDelay tune the retry loop. They are variables so
+	// tests can make it fast.
 	MaxAttempts = 5
 	BaseDelay   = 500 * time.Millisecond
 	MaxDelay    = 30 * time.Second
 )
 
+// retryable reports whether a status is worth retrying: throttling (429) and
+// temporary server errors (500, 502, 503, 504). Other errors (401, 403, 404...) are
+// answers, not hiccups.
 func retryable(code int) bool {
 	return code == 429 || code == 500 || code == 502 || code == 503 || code == 504
 }
 
+// delay is how long to wait before the next attempt: the server's Retry-After if
+// it sent one, otherwise exponential backoff from BaseDelay with random jitter (so
+// several uploads that failed together don't all retry at the same moment), capped at
+// MaxDelay.
 func delay(attempt int, resp *http.Response) time.Duration {
 	if resp != nil {
 		if s := resp.Header.Get("Retry-After"); s != "" {

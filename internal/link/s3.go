@@ -1,3 +1,7 @@
+// s3.go: the S3-compatible provider (a Pro feature). Unlike Google Drive it has no
+// browser sign-in: the user fills in a form with the endpoint, bucket and keys. The
+// non-secret settings go in s3.json; the keys go in the OS keychain, never in a file.
+
 package link
 
 import (
@@ -34,6 +38,7 @@ var ErrNoSecret = errors.New("link: no stored secret")
 // KeyringSecrets keeps secrets in the OS keychain.
 type KeyringSecrets struct{ Service string }
 
+// Get reads a secret from the OS keychain (ErrNoSecret if there is none).
 func (k KeyringSecrets) Get(key string) (string, error) {
 	v, err := keyring.Get(k.Service, key)
 	if errors.Is(err, keyring.ErrNotFound) {
@@ -42,8 +47,10 @@ func (k KeyringSecrets) Get(key string) (string, error) {
 	return v, err
 }
 
+// Set stores a secret in the OS keychain.
 func (k KeyringSecrets) Set(key, v string) error { return keyring.Set(k.Service, key, v) }
 
+// Delete removes a secret from the OS keychain (not an error if it isn't there).
 func (k KeyringSecrets) Delete(key string) error {
 	if err := keyring.Delete(k.Service, key); err != nil && !errors.Is(err, keyring.ErrNotFound) {
 		return err
@@ -54,13 +61,18 @@ func (k KeyringSecrets) Delete(key string) error {
 // MemorySecrets is an in-memory SecretStore for tests.
 type MemorySecrets map[string]string
 
+// Get returns a stored secret, or ErrNoSecret.
 func (m MemorySecrets) Get(k string) (string, error) {
 	if v, ok := m[k]; ok {
 		return v, nil
 	}
 	return "", ErrNoSecret
 }
+
+// Set stores a secret in memory.
 func (m MemorySecrets) Set(k, v string) error { m[k] = v; return nil }
+
+// Delete removes a secret from memory.
 func (m MemorySecrets) Delete(k string) error { delete(m, k); return nil }
 
 // S3Settings are the non-secret connection settings, kept in s3.json.
@@ -87,6 +99,8 @@ type S3Config struct {
 	HasSecret bool   `json:"hasSecret"`
 }
 
+// s3Creds is what is saved in the keychain for S3: the access key and the secret
+// key together, as one JSON value.
 type s3Creds struct {
 	AccessKey string `json:"a"`
 	SecretKey string `json:"s"`
@@ -102,8 +116,11 @@ func (m *Manager) EnableS3(secrets SecretStore, lic license.Checker) {
 	m.chosen = m.loadChoice()
 }
 
+// s3File is where the non-secret S3 settings live (s3.json in the state dir).
 func (m *Manager) s3File() string { return filepath.Join(m.dir, "s3.json") }
 
+// loadS3Settings reads the saved S3 settings; a missing, damaged or bucket-less file
+// means S3 is not set up.
 func (m *Manager) loadS3Settings() (S3Settings, bool) {
 	b, err := os.ReadFile(m.s3File())
 	if err != nil {
@@ -116,6 +133,7 @@ func (m *Manager) loadS3Settings() (S3Settings, bool) {
 	return s, true
 }
 
+// loadS3Creds reads the access and secret keys from the secret store.
 func (m *Manager) loadS3Creds() (s3Creds, error) {
 	v, err := m.secrets.Get(S3)
 	if err != nil {
@@ -240,6 +258,8 @@ func (m *Manager) forgetS3() error {
 	return nil
 }
 
+// newS3Store builds the S3 store from the saved settings and keys. It requires Pro
+// first, so a free user can't use S3 even with settings on disk.
 func (m *Manager) newS3Store() (store.Store, error) {
 	if err := license.Require(m.license); err != nil {
 		return nil, err

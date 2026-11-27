@@ -1,3 +1,6 @@
+// require.go: the Pro gate for features other than syncing worlds (S3 storage, turning
+// encryption on). Syncing itself is gated by Manager.Authorize in license.go.
+
 package license
 
 import "errors"

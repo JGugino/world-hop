@@ -1,3 +1,7 @@
+// page.go: serving the end-of-sign-in page from the loopback listener, and how the
+// outcome is recorded. The page is embedded (page/), styled like the web view, and
+// shows the final result only after the credentials are actually saved.
+
 package oauth
 
 import (
@@ -22,11 +26,15 @@ var outcomeGrace = 30 * time.Second
 // the credentials were saved (Pending.Saved) once the token exchange worked.
 var savedFallback = 2 * time.Minute
 
+// pageData is what the page template is filled with: the outcome plus a one-time
+// nonce that allows the page's own script under its Content-Security-Policy.
 type pageData struct {
 	Outcome
 	Nonce string
 }
 
+// writePage renders the page with strict security headers: no caching, no referrer,
+// and a Content-Security-Policy that allows only this page's own script and assets.
 func (p *Pending) writePage(w http.ResponseWriter, status int, o Outcome) {
 	nonce := randString(12)
 	h := w.Header()
@@ -40,12 +48,14 @@ func (p *Pending) writePage(w http.ResponseWriter, status int, o Outcome) {
 	_ = callbackTmpl.Execute(w, pageData{Outcome: o, Nonce: nonce})
 }
 
+// writeResult answers the page's polling request with the current outcome as JSON.
 func (p *Pending) writeResult(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(p.outcome())
 }
 
+// serveAsset returns a handler that serves one embedded file (the font or icon).
 func serveAsset(name, ctype string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		b, err := pageFS.ReadFile(name)

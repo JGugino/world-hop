@@ -1,5 +1,17 @@
 // Package oauth implements the installed-app OAuth flow with PKCE on a
 // loopback port, plus a refreshing token source.
+//
+// How a sign-in works: Flow.Start opens a listener on 127.0.0.1 and returns the
+// provider's consent URL (with a PKCE challenge and an unguessable state). The user
+// approves in the browser, the provider redirects to the loopback listener with a
+// code, and Pending.Wait exchanges the code (plus the PKCE verifier) for tokens.
+// Because the tokens are exchanged by the app itself with a one-time verifier, no
+// client secret needs to be kept confidential. Source then keeps a stored token
+// fresh, refreshing it when it nears expiry.
+//
+// Files: oauth.go (the flow and token source), tokens.go (token storage in the OS
+// keychain), outcome.go and page.go (what the browser tab shows at the end, with its
+// own page/ folder of assets).
 package oauth
 
 import (
@@ -47,6 +59,8 @@ func Challenge(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
+// randString returns n random bytes as URL-safe base64, used for the PKCE verifier
+// and the state parameter.
 func randString(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -83,6 +97,8 @@ type Pending struct {
 	fallback *time.Timer
 }
 
+// result is what the browser redirect delivered: an authorization code, or the
+// reason there isn't one.
 type result struct {
 	code string
 	err  error
@@ -224,6 +240,8 @@ func (p *Pending) Wait(ctx context.Context) (Token, error) {
 	return tok, nil
 }
 
+// tokenResp is the token endpoint's JSON reply (access token, refresh token,
+// lifetime) or its error fields.
 type tokenResp struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -232,6 +250,11 @@ type tokenResp struct {
 	ErrorDesc    string `json:"error_description"`
 }
 
+// exchange POSTs a form to the token endpoint (authorization code or refresh) and
+// returns the tokens. An invalid_grant answer means the grant is no longer valid and is
+// returned as ErrReauth, so callers can ask the user to sign in again instead of
+// treating it as a transient failure. If the reply has no new refresh token, oldRefresh
+// is kept.
 func exchange(ctx context.Context, hc *http.Client, cfg Config, form url.Values, oldRefresh string) (Token, error) {
 	form.Set("client_id", cfg.ClientID)
 	if cfg.ClientSecret != "" {

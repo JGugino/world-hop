@@ -48,6 +48,8 @@ type Info struct {
 	URL string `json:"url,omitempty"`
 }
 
+// saved is what update.json holds: when the last check happened and what it found.
+// It lets a restart skip the request if one was made within the day.
 type saved struct {
 	CheckedAt time.Time `json:"checkedAt"`
 	Latest    string    `json:"latest"`
@@ -87,6 +89,9 @@ func (c *Checker) Info() Info {
 	return c.infoLocked()
 }
 
+// infoLocked compares the saved latest release with this build. It reports an
+// update only if both versions parse, the link is on this project's GitHub, and the
+// latest is strictly newer. The caller holds c.mu.
 func (c *Checker) infoLocked() Info {
 	i := Info{Current: c.Current}
 	if cur, ok := parse(c.Current); ok && c.st.Latest != "" && safeURL(c.st.URL) {
@@ -144,6 +149,10 @@ func (c *Checker) Check(ctx context.Context) error {
 	return err
 }
 
+// fetch asks GitHub for the latest published release and returns its tag and page.
+// It accepts only stable releases (not drafts or pre-releases) with a parseable version
+// tag and a page link on this project's GitHub, so a surprising response can never make
+// the app show an arbitrary link.
 func (c *Checker) fetch(ctx context.Context) (tag, page string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.URL, nil)
 	if err != nil {
@@ -177,6 +186,7 @@ func (c *Checker) fetch(ctx context.Context) (tag, page string, err error) {
 	return rel.Tag, rel.HTMLURL, nil
 }
 
+// safeURL reports whether a release link starts with one of pagePrefixes.
 func safeURL(u string) bool {
 	for _, p := range pagePrefixes {
 		if strings.HasPrefix(u, p) {
@@ -207,6 +217,8 @@ func parse(v string) ([3]int, bool) {
 	return out, true
 }
 
+// newer reports whether version a is greater than version b (major, then minor,
+// then patch).
 func newer(a, b [3]int) bool {
 	for i := range a {
 		if a[i] != b[i] {
