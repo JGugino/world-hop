@@ -1,3 +1,5 @@
+// rekey.go: changing the passphrase. See the comment below for how it works.
+
 package crypt
 
 import (
@@ -83,10 +85,13 @@ type pending struct {
 	Header Header `json:"header"`
 }
 
+// pendingPath is where an unfinished passphrase change is remembered (rekey.json,
+// next to encryption.json).
 func (m *Manager) pendingPath() string {
 	return filepath.Join(filepath.Dir(m.path), "rekey.json")
 }
 
+// loadPending reads the remembered unfinished change, or nil.
 func (m *Manager) loadPending() *pending {
 	b, err := os.ReadFile(m.pendingPath())
 	if err != nil {
@@ -99,6 +104,9 @@ func (m *Manager) loadPending() *pending {
 	return &p
 }
 
+// savePending remembers an unfinished change (written atomically, owner-only). It
+// holds the new header (salt, cost, check: no secret) so a retry with the same new
+// passphrase reuses the salt and finds the data already copied.
 func (m *Manager) savePending(p pending) {
 	b, _ := json.Marshal(p)
 	tmp := m.pendingPath() + ".tmp"
@@ -107,6 +115,7 @@ func (m *Manager) savePending(p pending) {
 	}
 }
 
+// clearPending forgets the unfinished change (after it committed, or was superseded).
 func (m *Manager) clearPending() { os.Remove(m.pendingPath()) }
 
 // StartChangePassphrase checks the request and, if it is in order, starts
@@ -224,6 +233,7 @@ func (m *Manager) WaitChangePassphrase(ctx context.Context) {
 	}
 }
 
+// update applies f to the running change's progress record under the lock.
 func (m *Manager) update(f func(r *Rekey)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -232,6 +242,8 @@ func (m *Manager) update(f func(r *Rekey)) {
 	}
 }
 
+// finishRekey records how the background change ended (done, cancelled or failed
+// with a message) once runRekey returns.
 func (m *Manager) finishRekey(err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -325,6 +337,8 @@ type copier struct {
 	worlds    int
 }
 
+// worldPlan is what is left to copy for one world in a pass: its manifests not yet
+// copied, and the packs its newest versions need.
 type worldPlan struct {
 	id        string
 	manifests []string // not yet copied
@@ -450,6 +464,7 @@ func (c *copier) plan(id string, newPacks map[string]bool) (worldPlan, error) {
 	return pl, nil
 }
 
+// tick marks one copied item (via mark, under the lock) and reports progress.
 func (c *copier) tick(mark func()) {
 	c.mu.Lock()
 	mark()
@@ -458,6 +473,7 @@ func (c *copier) tick(mark func()) {
 	c.report()
 }
 
+// report sends the current done / total / worlds counts to the progress callback.
 func (c *copier) report() {
 	c.mu.Lock()
 	d, t, w := c.done, c.total, c.worlds
