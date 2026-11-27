@@ -1,3 +1,6 @@
+// auth.go: a fake token source for tests of code that signs requests and retries once
+// after a 401.
+
 package storetest
 
 import (
@@ -13,6 +16,7 @@ type Auth struct {
 	Refreshes    atomic.Int32
 }
 
+// Token returns the stale token until Invalidate is called, then the fresh one.
 func (a *Auth) Token(context.Context) (string, error) {
 	if a.invalid.Load() || a.Stale == "" {
 		return a.Fresh, nil
@@ -20,4 +24,6 @@ func (a *Auth) Token(context.Context) (string, error) {
 	return a.Stale, nil
 }
 
+// Invalidate marks the stale token as expired and counts the refresh, as the real
+// token source does when the server answers 401.
 func (a *Auth) Invalidate() { a.invalid.Store(true); a.Refreshes.Add(1) }

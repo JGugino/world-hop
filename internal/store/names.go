@@ -1,3 +1,11 @@
+// names.go: the shapes of legal pack and manifest names. Every backend validates names
+// with these before touching storage, so a name from the network or a tampered listing
+// can never become a path outside the store.
+
+// names.go: the shapes of legal pack and manifest names. Every backend validates names
+// with these before touching storage, so a name from the network or a tampered listing
+// can never become a path outside the store.
+
 package store
 
 import "regexp"

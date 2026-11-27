@@ -1,3 +1,6 @@
+// fakedrive.go: a fake Google Drive for tests, so the Drive store and the sync engine
+// can be tested end to end with no network and no Google account.
+
 package storetest
 
 import (
@@ -34,12 +37,16 @@ type FakeDrive struct {
 	Uploads int // number of file creations
 }
 
+// driveFile is one stored file: id, name, appProperties (world id and kind) and
+// content.
 type driveFile struct {
 	ID, Name string
 	Props    map[string]string
 	Data     []byte
 }
 
+// NewFakeDrive returns an empty fake Drive. Serve it with httptest and point a
+// gdrive.Store's APIBase at it.
 func NewFakeDrive() *FakeDrive {
 	d := &FakeDrive{files: map[string]*driveFile{}, sessions: map[string]string{}, Token: "tok"}
 	d.Server = httptest.NewServer(http.HandlerFunc(d.serve))
@@ -64,8 +71,11 @@ var (
 	propQ = regexp.MustCompile(`^appProperties has \{ key='world' and value='((?:[^'\\]|\\.)*)' \} and trashed=false$`)
 )
 
+// unesc reverses the single-quote escaping gdrive applies to query values.
 func unesc(s string) string { return strings.NewReplacer(`\'`, `'`, `\\`, `\`).Replace(s) }
 
+// serve routes a request to the Drive endpoint it imitates: list, media download,
+// delete, multipart upload, or the two-step resumable upload.
 func (d *FakeDrive) serve(w http.ResponseWriter, r *http.Request) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -126,6 +136,7 @@ func (d *FakeDrive) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// create stores a new file from an upload's metadata and content.
 func (d *FakeDrive) create(meta, data []byte) {
 	var m struct {
 		Name          string
@@ -140,6 +151,7 @@ func (d *FakeDrive) create(meta, data []byte) {
 	d.Uploads++
 }
 
+// multipart handles a one-request upload (metadata part, then content part).
 func (d *FakeDrive) multipart(w http.ResponseWriter, r *http.Request) {
 	_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil {
@@ -164,6 +176,8 @@ func (d *FakeDrive) multipart(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"id":"x"}`))
 }
 
+// list answers a files.list query for a name or an appProperties key and value,
+// returning two files per page so paging is exercised.
 func (d *FakeDrive) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	if q.Get("spaces") != "appDataFolder" {

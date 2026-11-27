@@ -30,6 +30,8 @@ const (
 	multipartMaxBytes = 5 << 20 // larger uploads use the resumable protocol
 )
 
+// Store keeps worlds in the hidden app-data folder of the user's Google Drive. It
+// uses an authenticated HTTP client (httpx.Authed) that refreshes the OAuth token.
 type Store struct {
 	c *httpx.Authed
 	// APIBase overrides the Google API host (tests).
@@ -38,21 +40,30 @@ type Store struct {
 
 var _ store.Store = (*Store)(nil)
 
+// New returns a Drive store that signs requests with auth. hc is the HTTP client
+// (nil means the default).
 func New(auth httpx.Auth, hc *http.Client) *Store {
 	return &Store{c: &httpx.Authed{HTTP: hc, Auth: auth}, APIBase: DefaultAPIBase}
 }
 
+// file is the part of a Drive file resource this package needs: its id, its flat
+// name ("packs/<hash>" or "worlds/<id>/<manifest>") and its size in bytes.
 type file struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Size string `json:"size"`
 }
 
+// esc escapes a string for use inside a single-quoted Drive query value.
 func esc(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s)
 }
 
-func packFile(name string) string        { return "packs/" + name }
+// packFile is the Drive file name of a pack.
+func packFile(name string) string { return "packs/" + name }
+
+// manifestFile is the Drive file name of a manifest. Drive has no folders in the
+// app-data space we use, so the "path" is just part of the name.
 func manifestFile(w, name string) string { return "worlds/" + w + "/" + name }
 
 // list runs a files.list query in the appDataFolder, following pages.
@@ -94,10 +105,12 @@ func (s *Store) list(ctx context.Context, q string) ([]file, error) {
 	}
 }
 
+// byName finds files by exact name. Drive allows duplicates, so it returns all of them.
 func (s *Store) byName(ctx context.Context, name string) ([]file, error) {
 	return s.list(ctx, "name='"+esc(name)+"'")
 }
 
+// download fetches a file's content (store.ErrNotFound if it is gone).
 func (s *Store) download(ctx context.Context, f file) ([]byte, error) {
 	resp, err := s.c.Do(ctx, func() (*http.Request, error) {
 		return http.NewRequest("GET", s.APIBase+"/drive/v3/files/"+url.PathEscape(f.ID)+"?alt=media", nil)
@@ -116,6 +129,8 @@ func (s *Store) download(ctx context.Context, f file) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// delete removes a Drive file. The only caller is PutPack clearing a junk file whose
+// size doesn't match its content-addressed name; WorldHop never deletes real data.
 func (s *Store) delete(ctx context.Context, id string) error {
 	resp, err := s.c.Do(ctx, func() (*http.Request, error) {
 		return http.NewRequest("DELETE", s.APIBase+"/drive/v3/files/"+url.PathEscape(id), nil)
@@ -134,6 +149,9 @@ func (s *Store) delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// create uploads a new file with the given name and appProperties (which hold the
+// world id and kind so listing can filter on them). Small files go in one multipart
+// request, larger ones use the resumable protocol.
 func (s *Store) create(ctx context.Context, name string, props map[string]string, data []byte) error {
 	meta, _ := json.Marshal(map[string]any{
 		"name":          name,
@@ -146,6 +164,7 @@ func (s *Store) create(ctx context.Context, name string, props map[string]string
 	return s.createResumable(ctx, meta, data)
 }
 
+// createMultipart uploads metadata and content in a single request (up to 5 MiB).
 func (s *Store) createMultipart(ctx context.Context, meta, data []byte) error {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
@@ -174,6 +193,9 @@ func (s *Store) createMultipart(ctx context.Context, meta, data []byte) error {
 	return nil
 }
 
+// createResumable uploads in two steps: ask Drive for an upload session URL, then
+// send the content to it. Used for packs over 5 MiB. The session URL carries its own
+// credential, so the second request has no bearer token.
 func (s *Store) createResumable(ctx context.Context, meta, data []byte) error {
 	resp, err := s.c.Do(ctx, func() (*http.Request, error) {
 		req, err := http.NewRequest("POST", s.APIBase+"/upload/drive/v3/files?uploadType=resumable&fields=id", bytes.NewReader(meta))
@@ -215,6 +237,10 @@ func (s *Store) createResumable(ctx context.Context, meta, data []byte) error {
 	return nil
 }
 
+// PutPack stores a pack. If a file of that name and size is already there it is
+// left alone (content-addressed names mean same size is the same pack in practice;
+// the engine verifies hashes on download). A file with that name but a different size
+// can only be junk from an interrupted upload, and is removed first.
 func (s *Store) PutPack(ctx context.Context, name string, data []byte) error {
 	if !store.ValidPackName(name) {
 		return fmt.Errorf("gdrive: bad pack name %q", name)
@@ -240,6 +266,7 @@ func (s *Store) PutPack(ctx context.Context, name string, data []byte) error {
 	return s.create(ctx, packFile(name), map[string]string{"kind": "pack"}, data)
 }
 
+// GetPack downloads a pack, or store.ErrNotFound.
 func (s *Store) GetPack(ctx context.Context, name string) ([]byte, error) {
 	if !store.ValidPackName(name) {
 		return nil, fmt.Errorf("gdrive: bad pack name %q", name)
@@ -271,6 +298,7 @@ func (s *Store) PutManifest(ctx context.Context, world, name string, data []byte
 	return s.create(ctx, manifestFile(world, name), map[string]string{"kind": "manifest", "world": world}, data)
 }
 
+// GetManifest downloads a manifest, or store.ErrNotFound.
 func (s *Store) GetManifest(ctx context.Context, world, name string) ([]byte, error) {
 	if !manifest.ValidID(world) || !store.ValidManifestName(name) {
 		return nil, fmt.Errorf("gdrive: bad manifest name %q/%q", world, name)
@@ -286,7 +314,7 @@ func (s *Store) GetManifest(ctx context.Context, world, name string) ([]byte, er
 }
 
 // ListWorlds finds every manifest in the app folder and groups them by world.
-// MissingPacks implements store.PackChecker with one listing of the packs.
+// MissingPacks implements store.PackChecker with one listing of every pack file, then a comparison in memory (cheaper than a request per pack).
 func (s *Store) MissingPacks(ctx context.Context, names []string) ([]string, error) {
 	fs, err := s.list(ctx, "appProperties has { key='kind' and value='pack' }")
 	if err != nil {
@@ -301,6 +329,8 @@ func (s *Store) MissingPacks(ctx context.Context, names []string) ([]string, err
 	return store.Missing(names, have), nil
 }
 
+// ListWorlds lists the ids of worlds that have at least one manifest, from the
+// manifest files' appProperties and names.
 func (s *Store) ListWorlds(ctx context.Context) ([]string, error) {
 	fs, err := s.list(ctx, "appProperties has { key='kind' and value='manifest' }")
 	if err != nil {
@@ -323,6 +353,7 @@ func (s *Store) ListWorlds(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
+// ListManifests lists a world's manifest names, sorted.
 func (s *Store) ListManifests(ctx context.Context, world string) ([]string, error) {
 	if !manifest.ValidID(world) {
 		return nil, fmt.Errorf("gdrive: bad world id %q", world)

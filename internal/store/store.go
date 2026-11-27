@@ -54,6 +54,19 @@ func Missing(names []string, have map[string]bool) []string {
 	return out
 }
 
+// Store is where a world's versions live: the user's cloud. It is deliberately
+// tiny and write-once, so every backend (a folder, Google Drive, S3) can implement it,
+// and the sync engine never has to reason about locking, overwriting or deleting:
+//
+//   - packs hold chunk data and are immutable and named by their content hash, so
+//     writing one twice is harmless;
+//   - manifests describe one version of a world and are never overwritten (a second
+//     write of the same name is ErrExists), which is what makes two computers
+//     writing at once safe: they write different names and the engine notices;
+//   - nothing is ever deleted by WorldHop.
+//
+// The sync engine does not talk to a backend directly: it goes through crypt.Manager
+// (optional encryption) and link.Manager (which backend the user chose).
 type Store interface {
 	// PutPack stores an immutable, content-addressed blob. Idempotent.
 	PutPack(ctx context.Context, name string, data []byte) error

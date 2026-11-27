@@ -1,3 +1,7 @@
+// sigv4.go: AWS Signature Version 4 request signing, implemented here instead of
+// pulling in the AWS SDK. Every S3 request is signed so the service knows it came from
+// the holder of the secret key.
+
 package s3
 
 import (
@@ -17,11 +21,14 @@ const (
 	emptyPayloadSHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 )
 
+// sum is the SHA-256 of b as hex (the payload hash SigV4 signs).
 func sum(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
 
+// hmacSHA256 is HMAC-SHA256 of s under key, the building block of SigV4's key
+// derivation and signature.
 func hmacSHA256(key []byte, s string) []byte {
 	m := hmac.New(sha256.New, key)
 	m.Write([]byte(s))
@@ -50,6 +57,8 @@ func uriEncode(s string, keepSlash bool) string {
 	return b.String()
 }
 
+// canonicalQuery sorts and encodes query parameters the way SigV4 requires, so the
+// signer and the service see an identical string.
 func canonicalQuery(v url.Values) string {
 	keys := make([]string, 0, len(v))
 	for k := range v {

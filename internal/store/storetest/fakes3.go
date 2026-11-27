@@ -1,3 +1,7 @@
+// fakes3.go: a fake S3 server for tests. It checks SigV4 signatures with its own
+// implementation, so a signing bug in the real store fails a test instead of passing
+// silently.
+
 package storetest
 
 import (
@@ -37,6 +41,8 @@ type FakeS3 struct {
 	Puts    int // PUT requests that stored data
 }
 
+// NewFakeS3 returns an empty fake bucket that accepts requests signed with the given
+// access key, secret key and region.
 func NewFakeS3(bucket, access, secret, region string) *FakeS3 {
 	f := &FakeS3{Bucket: bucket, AccessKey: access, SecretKey: secret, Region: region,
 		PageSize: 1000, objects: map[string][]byte{}}
@@ -56,12 +62,14 @@ func (f *FakeS3) Keys() []string {
 	return out
 }
 
+// Put stores an object directly, bypassing the HTTP API (for seeding tests).
 func (f *FakeS3) Put(key string, data []byte) {
 	f.mu.Lock()
 	f.objects[key] = data
 	f.mu.Unlock()
 }
 
+// Get returns a stored object and whether it exists.
 func (f *FakeS3) Get(key string) ([]byte, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -69,18 +77,21 @@ func (f *FakeS3) Get(key string) ([]byte, bool) {
 	return b, ok
 }
 
+// s3err writes an S3-style XML error response.
 func s3err(w http.ResponseWriter, status int, code, msg string) {
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><Error><Code>%s</Code><Message>%s</Message></Error>`, code, msg)
 }
 
+// hm is HMAC-SHA256, used to recompute the signature.
 func hm(key []byte, s string) []byte {
 	m := hmac.New(sha256.New, key)
 	m.Write([]byte(s))
 	return m.Sum(nil)
 }
 
+// enc percent-encodes a path the way SigV4 does.
 func enc(s string) string {
 	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
@@ -141,6 +152,8 @@ func (f *FakeS3) verify(r *http.Request, body []byte) (code, msg string) {
 	return "", ""
 }
 
+// serve routes a request: it verifies the signature first (403 on a mismatch), then
+// handles PUT (honouring If-None-Match), GET, HEAD and the list call.
 func (f *FakeS3) serve(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	f.mu.Lock()
@@ -200,6 +213,7 @@ func (f *FakeS3) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// list answers ListObjectsV2 for a prefix, paged by max-keys and continuation token.
 func (f *FakeS3) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	prefix, after := q.Get("prefix"), q.Get("continuation-token")

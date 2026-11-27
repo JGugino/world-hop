@@ -106,7 +106,10 @@ func New(cfg Config, hc *http.Client) (*Store, error) {
 	return &Store{cfg: cfg, hc: &c, Now: time.Now}, nil
 }
 
-func packKey(name string) string        { return "packs/" + name }
+// packKey is the object key of a pack (before any configured prefix).
+func packKey(name string) string { return "packs/" + name }
+
+// manifestKey is the object key of a manifest (before any configured prefix).
 func manifestKey(w, name string) string { return "worlds/" + w + "/" + name }
 
 // objectURL builds the request URL for a key ("" for the bucket itself).
@@ -139,8 +142,10 @@ func (s *Store) objectURL(key string, q url.Values) string {
 	return out
 }
 
+// escapePath percent-encodes an object key for a URL path, keeping slashes.
 func escapePath(p string) string { return uriEncode(p, true) }
 
+// key adds the configured prefix ("folder") to an object key.
 func (s *Store) key(k string) string {
 	if s.cfg.Prefix == "" {
 		return k
@@ -180,6 +185,8 @@ type Error struct {
 	Message string
 }
 
+// Error formats an S3 error, adding a hint for the common ones (wrong keys, region
+// or endpoint) so the message tells the user what to check.
 func (e *Error) Error() string {
 	var hint string
 	switch e.Code {
@@ -200,6 +207,8 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("s3: %s: %s%s", e.Code, e.Message, hint)
 }
 
+// readError turns a failed response into an *Error, reading at most 8 KiB of the
+// XML body for the S3 error code and message.
 func readError(resp *http.Response) error {
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
@@ -224,6 +233,7 @@ func readError(resp *http.Response) error {
 	return e
 }
 
+// ok reports whether the response status is a success (2xx).
 func ok(resp *http.Response) bool { return resp.StatusCode >= 200 && resp.StatusCode < 300 }
 
 // head returns the object's size, or ok=false if it does not exist.
@@ -243,6 +253,7 @@ func (s *Store) head(ctx context.Context, key string) (size int64, found bool, e
 	return 0, false, readError(resp)
 }
 
+// get downloads an object, or store.ErrNotFound for a 404.
 func (s *Store) get(ctx context.Context, key string) ([]byte, error) {
 	resp, err := s.do(ctx, "GET", s.key(key), nil, nil, nil)
 	if err != nil {
@@ -262,6 +273,7 @@ func (s *Store) get(ctx context.Context, key string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// put uploads an object with a signed request.
 func (s *Store) put(ctx context.Context, key string, data []byte, hdr map[string]string) (*http.Response, error) {
 	if data == nil {
 		data = []byte{}
@@ -269,6 +281,8 @@ func (s *Store) put(ctx context.Context, key string, data []byte, hdr map[string
 	return s.do(ctx, "PUT", s.key(key), nil, data, hdr)
 }
 
+// PutPack stores a pack. If an object of that name and size already exists it is
+// left alone (the name is the content hash); the engine verifies hashes on download.
 func (s *Store) PutPack(ctx context.Context, name string, data []byte) error {
 	if !store.ValidPackName(name) {
 		return fmt.Errorf("s3: bad pack name %q", name)
@@ -291,6 +305,7 @@ func (s *Store) PutPack(ctx context.Context, name string, data []byte) error {
 	return nil
 }
 
+// GetPack downloads a pack, or store.ErrNotFound.
 func (s *Store) GetPack(ctx context.Context, name string) ([]byte, error) {
 	if !store.ValidPackName(name) {
 		return nil, fmt.Errorf("s3: bad pack name %q", name)
@@ -334,6 +349,7 @@ func (s *Store) PutManifest(ctx context.Context, world, name string, data []byte
 	return readError(resp)
 }
 
+// GetManifest downloads a manifest, or store.ErrNotFound.
 func (s *Store) GetManifest(ctx context.Context, world, name string) ([]byte, error) {
 	if !manifest.ValidID(world) || !store.ValidManifestName(name) {
 		return nil, fmt.Errorf("s3: bad manifest name %q/%q", world, name)
@@ -341,6 +357,7 @@ func (s *Store) GetManifest(ctx context.Context, world, name string) ([]byte, er
 	return s.get(ctx, manifestKey(world, name))
 }
 
+// listResult is the part of an S3 ListObjectsV2 response this package reads.
 type listResult struct {
 	IsTruncated bool   `xml:"IsTruncated"`
 	NextToken   string `xml:"NextContinuationToken"`
@@ -396,6 +413,7 @@ func (s *Store) Test(ctx context.Context) error {
 	return err
 }
 
+// ListManifests lists a world's manifest names, sorted.
 func (s *Store) ListManifests(ctx context.Context, world string) ([]string, error) {
 	if !manifest.ValidID(world) {
 		return nil, fmt.Errorf("s3: bad world id %q", world)
@@ -415,7 +433,7 @@ func (s *Store) ListManifests(ctx context.Context, world string) ([]string, erro
 	return out, nil
 }
 
-// MissingPacks implements store.PackChecker with one listing of the packs.
+// MissingPacks implements store.PackChecker with one listing of the packs/ prefix, then a comparison in memory (cheaper than a request per pack).
 func (s *Store) MissingPacks(ctx context.Context, names []string) ([]string, error) {
 	keys, err := s.list(ctx, "packs/", 0, false)
 	if err != nil {
@@ -430,6 +448,7 @@ func (s *Store) MissingPacks(ctx context.Context, names []string) ([]string, err
 	return store.Missing(names, have), nil
 }
 
+// ListWorlds lists the ids of worlds that have at least one manifest.
 func (s *Store) ListWorlds(ctx context.Context) ([]string, error) {
 	keys, err := s.list(ctx, "worlds/", 0, false)
 	if err != nil {
