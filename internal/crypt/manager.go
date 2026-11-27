@@ -20,6 +20,10 @@ var (
 	// ErrLocked: encryption is on but no key is loaded (after a restart without
 	// "remember", or after locking).
 	ErrLocked = store.ErrEncryptionLocked
+	// ErrPassphraseChanged: another computer changed the passphrase.
+	ErrPassphraseChanged = store.ErrPassphraseChanged
+	// ErrRekeying: a passphrase change is running on this computer.
+	ErrRekeying = store.ErrRekeying
 	// ErrProRequired: turning encryption on is a Pro feature.
 	ErrProRequired = license.ErrProRequired
 	// ErrNotConfirmed: creating a new key needs the passphrase twice and an
@@ -63,7 +67,15 @@ func (k KeyringKeys) Delete(id string) error {
 type settings struct {
 	Enabled  bool `json:"enabled"`
 	Remember bool `json:"remember"`
+	// KeyID is the key header this computer last unlocked, so that a header
+	// written by another computer's passphrase change is noticed, even after a
+	// restart. Empty for settings saved by an earlier version.
+	KeyID string `json:"keyId,omitempty"`
 }
+
+// headerRecheck is how often an unlocked computer looks for a key header that
+// another computer wrote.
+const headerRecheck = time.Minute
 
 // Manager is the store the engine uses. It passes straight through while
 // encryption is off and encrypts once it is on, switchable at runtime. It
@@ -77,12 +89,27 @@ type Manager struct {
 	// Params is the KDF cost for new keys (DefaultParams if zero).
 	Params Params
 
-	path string
-	mu   sync.Mutex
-	cfg  settings
-	hdr  *Header
-	key  *Key
-	enc  *Store
+	// Now is the clock (time.Now if nil).
+	Now func() time.Time
+
+	path    string
+	mu      sync.Mutex
+	cfg     settings
+	hdr     *Header
+	key     *Key
+	enc     *Store
+	checked time.Time // when the key header was last compared with the store's
+
+	rekey       *Rekey
+	rekeyCancel context.CancelFunc
+	rekeyDone   chan struct{}
+}
+
+func (m *Manager) now() time.Time {
+	if m.Now != nil {
+		return m.Now()
+	}
+	return time.Now()
 }
 
 var _ store.Store = (*Manager)(nil)
@@ -131,7 +158,20 @@ func (m *Manager) current(ctx context.Context) (store.Store, error) {
 	if !m.cfg.Enabled {
 		return m.Inner, nil
 	}
+	if m.rekey != nil && m.rekey.State == RekeyRunning {
+		return nil, ErrRekeying
+	}
 	if m.enc != nil {
+		if m.now().Sub(m.checked) < headerRecheck {
+			return m.enc, nil
+		}
+		// Another computer may have changed the passphrase since. A failed
+		// look is not a reason to stop: the real request will say what is wrong.
+		if h, err := ReadHeader(ctx, m.Inner); err == nil && m.hdr != nil && h.Generation() > m.hdr.Generation() {
+			m.forget(m.hdr.ID())
+			return nil, ErrPassphraseChanged
+		}
+		m.checked = m.now()
 		return m.enc, nil
 	}
 	h, err := ReadHeader(ctx, m.Inner)
@@ -145,13 +185,30 @@ func (m *Manager) current(ctx context.Context) (store.Store, error) {
 		}
 	}
 	if k == nil {
+		if m.cfg.KeyID != "" && m.cfg.KeyID != h.ID() {
+			m.forget(m.cfg.KeyID)
+			return nil, ErrPassphraseChanged
+		}
 		return nil, ErrLocked
 	}
 	if err := h.Verify(k); err != nil {
 		return nil, err
 	}
-	m.hdr, m.key, m.enc = h, k, New(m.Inner, k)
+	m.hdr, m.key, m.enc, m.checked = h, k, NewForGeneration(m.Inner, k, h.Generation()), m.now()
 	return m.enc, nil
+}
+
+// forget drops the key that no longer matches the store, including the copy
+// in the keychain. The caller holds m.mu.
+func (m *Manager) forget(oldID string) {
+	if m.Keys != nil && oldID != "" {
+		m.Keys.Delete(oldID)
+	}
+	m.key, m.enc = nil, nil
+	if m.cfg.Remember {
+		m.cfg.Remember = false
+		m.save()
+	}
 }
 
 // Info is what the UI shows.
@@ -162,8 +219,12 @@ type Info struct {
 	Remember bool `json:"remember"`
 	// KeyInStore: whether the store already has a key (another computer set it
 	// up). Nil when it could not be checked (for example no account linked).
-	KeyInStore *bool  `json:"keyInStore"`
-	Error      string `json:"error,omitempty"`
+	KeyInStore *bool `json:"keyInStore"`
+	// KeyChanged: another computer changed the passphrase; enter the new one.
+	KeyChanged bool `json:"keyChanged,omitempty"`
+	// Rekey is the passphrase change in progress or just finished, if any.
+	Rekey *Rekey `json:"rekey,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // Info reports the current state. It may touch the store to look for a key.
@@ -172,11 +233,17 @@ func (m *Manager) Info(ctx context.Context) Info {
 	m.mu.Lock()
 	in.Enabled, in.Remember = m.cfg.Enabled, m.cfg.Remember
 	in.Unlocked = m.enc != nil
+	if m.rekey != nil {
+		r := *m.rekey
+		in.Rekey = &r
+	}
 	m.mu.Unlock()
 	if in.Enabled && !in.Unlocked {
 		if _, err := m.current(ctx); err == nil {
 			in.Unlocked = true // key came from the keychain
-		} else if !errors.Is(err, ErrLocked) {
+		} else if errors.Is(err, ErrPassphraseChanged) {
+			in.KeyChanged = true
+		} else if !errors.Is(err, ErrLocked) && !errors.Is(err, ErrRekeying) {
 			in.Error = err.Error()
 		}
 	}
@@ -200,6 +267,9 @@ func (m *Manager) Info(ctx context.Context) Info {
 // passphrase must be typed twice and acknowledged); otherwise the passphrase
 // must match the existing key, which is how a second computer joins.
 func (m *Manager) Enable(ctx context.Context, pass, confirm string, acknowledged, remember bool) error {
+	if m.isRekeying() {
+		return ErrRekeying
+	}
 	if m.Pro == nil || !m.Pro() {
 		return ErrProRequired
 	}
@@ -243,6 +313,9 @@ func (m *Manager) Enable(ctx context.Context, pass, confirm string, acknowledged
 
 // Unlock supplies the passphrase after a restart or a lock.
 func (m *Manager) Unlock(ctx context.Context, pass string, remember bool) error {
+	if m.isRekeying() {
+		return ErrRekeying
+	}
 	h, err := ReadHeader(ctx, m.Inner)
 	if err != nil {
 		return err
@@ -265,13 +338,19 @@ func (m *Manager) set(h *Header, k *Key, remember bool) error {
 		m.Keys.Delete(h.ID())
 	}
 	prev := m.cfg
-	m.cfg = settings{Enabled: true, Remember: remember && m.Keys != nil}
+	m.cfg = settings{Enabled: true, Remember: remember && m.Keys != nil, KeyID: h.ID()}
 	if err := m.save(); err != nil {
 		m.cfg = prev
 		return err
 	}
-	m.hdr, m.key, m.enc = h, k, New(m.Inner, k)
+	m.hdr, m.key, m.enc, m.checked = h, k, NewForGeneration(m.Inner, k, h.Generation()), m.now()
 	return nil
+}
+
+func (m *Manager) isRekeying() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.rekey != nil && m.rekey.State == RekeyRunning
 }
 
 // Lock forgets the key (in memory and in the keychain). Encryption stays on,
@@ -279,6 +358,9 @@ func (m *Manager) set(h *Header, k *Key, remember bool) error {
 func (m *Manager) Lock() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.rekey != nil && m.rekey.State == RekeyRunning {
+		return ErrRekeying
+	}
 	if m.hdr != nil && m.Keys != nil {
 		m.Keys.Delete(m.hdr.ID())
 	}
@@ -292,6 +374,9 @@ func (m *Manager) Lock() error {
 func (m *Manager) Disable() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.rekey != nil && m.rekey.State == RekeyRunning {
+		return ErrRekeying
+	}
 	if m.hdr != nil && m.Keys != nil {
 		m.Keys.Delete(m.hdr.ID())
 	}

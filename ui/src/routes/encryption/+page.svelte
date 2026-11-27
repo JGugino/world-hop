@@ -6,6 +6,9 @@
 		unlockEncryption,
 		lockEncryption,
 		disableEncryption,
+		changePassphrase,
+		cancelChangePassphrase,
+		dismissChangePassphrase,
 		type Encryption
 	} from '$lib/api';
 
@@ -17,6 +20,49 @@
 	let error = $state('');
 	let busy = $state(false);
 	let confirmDisable = $state(false);
+
+	// Changing the passphrase.
+	let changing = $state(false);
+	let curPass = $state('');
+	let newPass = $state('');
+	let newConfirm = $state('');
+	let newAck = $state(false);
+	let newRemember = $state(false);
+	let confirmCancel = $state(false);
+
+	const rekey = $derived(enc?.rekey);
+	const running = $derived(rekey?.state === 'running');
+	const pct = $derived(
+		rekey && rekey.total > 0 ? Math.min(100, Math.round((rekey.done / rekey.total) * 100)) : 0
+	);
+	const newTooShort = $derived(newPass.length > 0 && [...newPass].length < 10);
+
+	function openChange() {
+		changing = true;
+		newRemember = enc?.remember ?? false;
+	}
+	function closeChange() {
+		changing = false;
+		curPass = newPass = newConfirm = '';
+		newAck = false;
+	}
+	async function startChange() {
+		busy = true;
+		error = '';
+		try {
+			enc = await changePassphrase({
+				current: curPass,
+				passphrase: newPass,
+				confirm: newConfirm,
+				acknowledged: newAck,
+				remember: newRemember
+			});
+			closeChange();
+		} catch (e) {
+			error = msg(e);
+		}
+		busy = false;
+	}
 
 	const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -47,10 +93,79 @@
 	// only needs the passphrase.
 	const creating = $derived(enc?.keyInStore !== true);
 
-	onMount(load);
+	onMount(() => {
+		load();
+		// While a change runs, follow its progress.
+		const t = setInterval(() => {
+			if (running) load();
+		}, 1000);
+		return () => clearInterval(t);
+	});
 </script>
 
 {#if error}<p class="bad">{error}</p>{/if}
+
+{#if rekey}
+	<section class="card" class:fail={rekey.state === 'failed'} aria-live="polite">
+		{#if rekey.state === 'running'}
+			<h2>Changing your passphrase</h2>
+			<p class="muted">
+				{#if rekey.phase === 'finishing'}Switching over…{:else if rekey.total === 0}Looking at your
+					worlds…{:else}Re-encrypting {rekey.worlds} world{rekey.worlds === 1 ? '' : 's'} with the
+					new passphrase.{/if}
+			</p>
+			<div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct}>
+				<div class="fill" style="width: {pct}%"></div>
+			</div>
+			<p class="small muted">{rekey.done} of {rekey.total} items · {pct}%</p>
+			<p class="muted small">
+				Syncing is paused on this computer until this finishes. Keep WorldHop open, and avoid
+				syncing from your other computers meanwhile. If you stop it, nothing changes.
+			</p>
+			<div class="row">
+				{#if confirmCancel}
+					<button class="danger" onclick={() => run(cancelChangePassphrase)}>Stop the change</button>
+					<button class="secondary" onclick={() => (confirmCancel = false)}>Keep going</button>
+				{:else}
+					<button class="secondary" onclick={() => (confirmCancel = true)}>Cancel…</button>
+				{/if}
+			</div>
+		{:else if rekey.state === 'done'}
+			<h2>Passphrase changed</h2>
+			<p class="ok">
+				Your worlds are now encrypted with the new passphrase, and syncing continues as normal.
+			</p>
+			<ul class="small muted">
+				<li>
+					On your other computers, open the Encryption tab and enter the <strong>new</strong>
+					passphrase when asked. The old one no longer works for new data.
+				</li>
+				<li>
+					The previous encrypted copy is still in your cloud account, and can still be opened with
+					the <strong>old</strong> passphrase. WorldHop can’t delete it for you. If you changed the
+					passphrase because the old one was exposed, remove the old copy in your cloud provider’s
+					own settings.
+				</li>
+			</ul>
+			<div class="row"><button onclick={() => run(dismissChangePassphrase)}>OK</button></div>
+		{:else if rekey.state === 'cancelled'}
+			<h2>Change stopped</h2>
+			<p class="muted">
+				Nothing was changed. Your old passphrase still works, and syncing continues. Starting
+				again with the same new passphrase picks up where this left off.
+			</p>
+			<div class="row"><button onclick={() => run(dismissChangePassphrase)}>OK</button></div>
+		{:else}
+			<h2>The passphrase was not changed</h2>
+			<p class="bad">{rekey.error}</p>
+			<p class="muted small">
+				Nothing was changed. Your old passphrase still works, and syncing continues. You can try
+				again.
+			</p>
+			<div class="row"><button onclick={() => run(dismissChangePassphrase)}>OK</button></div>
+		{/if}
+	</section>
+{/if}
 
 {#if !enc}
 	<p class="muted">Loading…</p>
@@ -71,7 +186,10 @@
 			</p>
 		{/if}
 		<div class="row">
-			<button class="secondary" disabled={busy} onclick={() => run(lockEncryption)}>Lock now</button>
+			<button class="secondary" disabled={busy || running} onclick={() => run(lockEncryption)}>Lock now</button>
+			<button class="secondary" disabled={busy || running || changing} onclick={openChange}>
+				Change passphrase…
+			</button>
 			{#if confirmDisable}
 				<button class="danger" disabled={busy} onclick={() => run(disableEncryption)}>
 					Turn off on this computer
@@ -81,6 +199,46 @@
 				<button class="secondary" onclick={() => (confirmDisable = true)}>Turn off…</button>
 			{/if}
 		</div>
+		{#if changing}
+			<form
+				class="col change"
+				onsubmit={(e) => {
+					e.preventDefault();
+					startChange();
+				}}>
+				<h3>Change passphrase</h3>
+				<input type="password" bind:value={curPass} placeholder="Current passphrase" autocomplete="current-password" />
+				<input type="password" bind:value={newPass} placeholder="New passphrase" autocomplete="new-password" />
+				{#if newTooShort}<p class="warn small">At least 10 characters.</p>{/if}
+				<input type="password" bind:value={newConfirm} placeholder="New passphrase again" autocomplete="new-password" />
+				<div class="danger-box">
+					<strong>If you lose the new passphrase, your encrypted worlds cannot be recovered.</strong>
+					Nobody can reset it, not us and not your cloud provider.
+				</div>
+				<label class="check">
+					<input type="checkbox" bind:checked={newAck} /> I understand that a lost passphrase means
+					lost data
+				</label>
+				<label class="check">
+					<input type="checkbox" bind:checked={newRemember} /> Remember on this computer (system keychain)
+				</label>
+				<p class="muted small">
+					Every world is re-encrypted with the new passphrase and uploaded again. That can take a
+					while and uses as much upload as your worlds are big. Syncing here pauses until it is done.
+					Your other computers keep working until it finishes, then ask for the new passphrase. The
+					previous encrypted copy stays in your cloud account (WorldHop can’t delete it) and can still
+					be opened with the old passphrase.
+				</p>
+				<div class="row">
+					<button
+						type="submit"
+						disabled={busy || !curPass || !newPass || newTooShort || !newConfirm || !newAck}>
+						{busy ? 'Checking…' : 'Change passphrase'}
+					</button>
+					<button type="button" class="secondary" onclick={closeChange}>Cancel</button>
+				</div>
+			</form>
+		{/if}
 		{#if confirmDisable}
 			<p class="muted small">
 				This computer goes back to uploading worlds unencrypted. Encrypted copies already in your
@@ -91,10 +249,17 @@
 {:else if enc.enabled}
 	<section class="card">
 		<h2>Encryption is locked</h2>
-		<p class="warn">
-			Syncing is paused until you enter your passphrase. Nothing is uploaded unencrypted while it
-			is locked.
-		</p>
+		{#if enc.keyChanged}
+			<p class="warn">
+				The passphrase was changed on another computer. Enter the <strong>new</strong> passphrase to
+				resume syncing. The old one no longer works.
+			</p>
+		{:else}
+			<p class="warn">
+				Syncing is paused until you enter your passphrase. Nothing is uploaded unencrypted while it
+				is locked.
+			</p>
+		{/if}
 		<form
 			class="col"
 			onsubmit={(e) => {
@@ -172,6 +337,18 @@
 {/if}
 
 <style>
+	.change { border-top: 2px solid var(--line); margin-top: 16px; padding-top: 12px; max-width: 460px; }
+	.card.fail { border-left: 6px solid var(--bad); }
+	.track {
+		height: 22px; background: #111315; border: 2px solid #000; margin: 10px 0 6px;
+		box-shadow: inset 2px 2px 0 #000, inset -2px -2px 0 #3c434a; padding: 2px;
+	}
+	.fill {
+		height: 100%; background: var(--accent); box-shadow: inset 0 -4px 0 #2f6b21, inset 0 3px 0 #8ee070;
+		transition: width 0.4s steps(12);
+	}
+	ul { margin: 8px 0; padding-left: 20px; }
+	li { margin: 6px 0; }
 	.col { display: flex; flex-direction: column; gap: 10px; max-width: 420px; margin-top: 8px; }
 	.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 	.ok { color: var(--ok); }

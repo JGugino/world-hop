@@ -57,6 +57,9 @@ type Encrypter interface {
 	Unlock(ctx context.Context, pass string, remember bool) error
 	Lock() error
 	Disable() error
+	StartChangePassphrase(ctx context.Context, current, next, confirm string, acknowledged, remember bool) error
+	CancelChangePassphrase()
+	DismissRekey()
 }
 
 var _ Encrypter = (*crypt.Manager)(nil)
@@ -400,9 +403,12 @@ func writeServiceErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, err)
 	case errors.Is(err, crypt.ErrWrongPassphrase):
 		writeErr(w, http.StatusUnauthorized, err)
-	case errors.Is(err, crypt.ErrNotConfirmed), errors.Is(err, crypt.ErrWeakPassphrase):
+	case errors.Is(err, crypt.ErrNotConfirmed), errors.Is(err, crypt.ErrWeakPassphrase),
+		errors.Is(err, crypt.ErrSamePassphrase), errors.Is(err, crypt.ErrNotEnabled):
 		writeErr(w, http.StatusBadRequest, err)
-	case errors.Is(err, crypt.ErrLocked):
+	case errors.Is(err, crypt.ErrRekeying):
+		writeErr(w, http.StatusConflict, err)
+	case errors.Is(err, crypt.ErrLocked), errors.Is(err, crypt.ErrPassphraseChanged):
 		writeErr(w, http.StatusLocked, err)
 	case errors.Is(err, license.ErrProRequired):
 		writeErr(w, http.StatusPaymentRequired, err)
