@@ -63,7 +63,9 @@ func Missing(names []string, have map[string]bool) []string {
 //   - manifests describe one version of a world and are never overwritten (a second
 //     write of the same name is ErrExists), which is what makes two computers
 //     writing at once safe: they write different names and the engine notices;
-//   - nothing is ever deleted by WorldHop.
+//   - there is no delete: WorldHop never removes data from the cloud (the one
+//     exception is the Drive backend clearing a junk file that shares a pack's name
+//     but is the wrong size, left by an interrupted upload).
 //
 // The sync engine does not talk to a backend directly: it goes through crypt.Manager
 // (optional encryption) and link.Manager (which backend the user chose).

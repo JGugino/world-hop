@@ -1,3 +1,8 @@
+<!--
+The License tab. Shows whether this computer is on the free version (one world) or
+Pro, lets the user paste a license key to activate Pro, and, on the free version,
+choose which world is the free one.
+-->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
@@ -17,11 +22,13 @@
 	let busy = $state(false);
 	let confirmRemove = $state(false);
 
+	// msg turns an error into a sentence for display.
 	const msg = (e: unknown) => {
 		const m = e instanceof Error ? e.message : String(e);
 		return m.charAt(0).toUpperCase() + m.slice(1);
 	};
 
+	// load fetches the license state and the worlds (to choose the free world from).
 	async function load() {
 		try {
 			[lic, worlds] = await Promise.all([getLicense(), getWorlds()]);
@@ -30,6 +37,8 @@
 		}
 	}
 
+	// run wraps a license action: shows an error if it fails, then refreshes the state and
+	// the worlds.
 	async function run(fn: () => Promise<License>) {
 		busy = true;
 		error = '';
@@ -42,6 +51,7 @@
 		busy = false;
 	}
 
+	// activate verifies the entered key with Gumroad and switches to Pro.
 	const activate = () =>
 		run(async () => {
 			const l = await activateLicense(key);
@@ -49,12 +59,14 @@
 			return l;
 		});
 
+	// remove forgets the license key on this computer.
 	const remove = () =>
 		run(async () => {
 			confirmRemove = false;
 			return deactivateLicense();
 		});
 
+	// when formats a date for display.
 	const when = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 
 	onMount(load);

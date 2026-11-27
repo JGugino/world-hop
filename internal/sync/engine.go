@@ -88,8 +88,7 @@ func (e *ConflictError) Error() string {
 // The Store is normally the crypt.Manager wrapping the link.Manager (so
 // encryption and the chosen cloud account are transparent here). Create one with
 // New and set the optional hooks (IsOpen, Authorize, StateScope, ...) before use.
-// An Engine is safe for concurrent use for different worlds; the Runner makes
-// sure only one sync pass runs at a time.
+// The Runner makes sure only one sync pass runs at a time.
 type Engine struct {
 	Store         store.Store
 	StateDir      string // per-device state and snapshots

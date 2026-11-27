@@ -1,7 +1,7 @@
 // Package config persists the user's settings (currently the list of sync
-// sources) in a small JSON file. It is separate from the other state files
-// (provider.json, license.json, ...) because it is the only one the web view edits
-// directly: the Saves tab adds and removes sources here.
+// sources) in a small JSON file (config.json). The other state files
+// (provider.json, license.json, encryption.json, ...) belong to the managers that own
+// them; this one is the Saves tab's list of what to keep synced.
 package config
 
 import (

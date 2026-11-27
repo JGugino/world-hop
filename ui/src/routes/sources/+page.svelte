@@ -1,3 +1,9 @@
+<!--
+The Saves tab. Where the user tells WorldHop which folders to keep synced: a saves
+folder (every world inside it, including ones created later) or a single world.
+Sources can be added by typing a path or browsing, and removed without touching any
+files.
+-->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getSources, addSource, removeSource, pickFolder, type Source, type SourceKind } from '$lib/api';
@@ -11,8 +17,10 @@
 	let pickerMissing = $state(false);
 	let confirmRemove = $state<string | null>(null);
 
+	// key is a unique identifier for a source, for the list.
 	const key = (s: Source) => `${s.kind}:${s.path}`;
 
+	// load fetches the configured sources.
 	async function load() {
 		try {
 			sources = await getSources();
@@ -21,6 +29,8 @@
 		}
 	}
 
+	// add validates and adds the source typed or picked; the server checks the folder
+	// exists and, for a single world, that it has a level.dat.
 	async function add(e: SubmitEvent) {
 		e.preventDefault();
 		adding = true;
@@ -34,6 +44,8 @@
 		adding = false;
 	}
 
+	// browse opens the operating system's folder dialog (a web page can't learn a real
+	// path itself, so the program shows it).
 	async function browse() {
 		picking = true;
 		error = '';
@@ -47,6 +59,7 @@
 		picking = false;
 	}
 
+	// remove stops syncing a source. Nothing on disk or in the cloud is deleted.
 	async function remove(s: Source) {
 		error = '';
 		try {

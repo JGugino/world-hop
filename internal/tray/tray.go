@@ -9,8 +9,9 @@ import (
 	"fyne.io/systray"
 )
 
-// Handlers are what the menu items do. Each is called from the tray's goroutine, so
-// slow ones (a sync, opening a page) are started in their own goroutines.
+// Handlers are what the menu items do. OpenView and Exit run on the menu's own
+// goroutine; ForceSync and OpenUpdate are started in goroutines of their own, so a
+// slow sync or a browser launch never freezes the menu.
 type Handlers struct {
 	OpenView  func()
 	ForceSync func()

@@ -1,3 +1,10 @@
+<!--
+The Cloud account tab. Shows each storage choice as a card: Google Drive (connect
+with a browser sign-in) and S3-compatible storage (a Pro feature, set up with a
+form). Connecting, disconnecting and the S3 form all live here. The page polls every
+2 seconds so a card flips to Connected as soon as the sign-in finishes in the other
+tab.
+-->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
@@ -14,9 +21,11 @@
 	let providers = $state<Provider[]>([]);
 	let loaded = $state(false);
 	let error = $state('');
+	// busy holds the provider whose action is running.
 	let busy = $state<string | null>(null);
 	let confirmUnlink = $state<string | null>(null);
 
+	// load fetches the providers and their state.
 	async function load() {
 		try {
 			providers = await getProviders();
@@ -26,6 +35,9 @@
 		}
 	}
 
+	// connect starts linking a provider. For Google Drive the program opens the browser
+	// itself; if it didn't, the sign-in URL is opened in a new tab. The page then polls
+	// (see onMount) until the account shows as connected.
 	async function connect(p: Provider) {
 		busy = p.id;
 		error = '';
@@ -39,6 +51,7 @@
 		await load();
 	}
 
+	// disconnect forgets the stored sign-in or keys. Cloud data is left alone.
 	async function disconnect(p: Provider) {
 		busy = p.id;
 		error = '';
@@ -61,6 +74,8 @@
 	let s3Result = $state<{ ok: boolean; text: string } | null>(null);
 	let s3Busy = $state(false);
 
+	// editS3 opens the S3 form filled with the saved settings (never the secret key;
+	// leaving it blank keeps the stored one).
 	async function editS3() {
 		error = '';
 		s3Result = null;
@@ -74,6 +89,7 @@
 		}
 	}
 
+	// runTestS3 checks the entered settings against the bucket without saving them.
 	async function runTestS3() {
 		s3Busy = true;
 		s3Result = null;
@@ -88,6 +104,7 @@
 		s3Busy = false;
 	}
 
+	// doSaveS3 saves the S3 settings and keys and makes S3 the storage in use.
 	async function doSaveS3() {
 		s3Busy = true;
 		error = '';

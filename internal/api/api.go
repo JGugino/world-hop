@@ -1,7 +1,7 @@
 // Package api serves the local HTTP API and embedded UI on 127.0.0.1.
 //
 // The web view (the SvelteKit app in ui/) is the only user interface, and it talks to
-// the rest of the program through this package. Nothing here makes decisions: each
+// the rest of the program through this package. Nothing here makes sync decisions: each
 // handler checks its input, calls the sync Runner or one of the managers (cloud
 // account, encryption, license, sources, updates) and returns JSON. The server is
 // loopback-only, rejects requests with a foreign Host or Origin (so a web page the

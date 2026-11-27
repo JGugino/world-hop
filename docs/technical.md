@@ -59,6 +59,10 @@ tray (cmd/worldhop) ──► Runner ──► Engine ──► crypt.Manager �
 | `internal/tray`, `internal/window` | Tray icon and menu; opening the UI |
 | `ui/` | SvelteKit web view (routes: Worlds `/`, Saves `/sources`, Cloud `/cloud`, Encryption `/encryption`, License `/license`) |
 
+### 2.1.1 Reading the code
+
+Every package starts with a package comment that says what it is for and how its files divide the work, every non-test file with a header comment, and every function and type with a doc comment (the Svelte pages and `ui/src/lib/api.ts` follow the same convention). A good way in is `go doc -all ./internal/sync` (or any other package), or reading the package comment at the top of the package's main file. Start with `internal/sync/engine.go` for the sync model, `internal/crypt/crypt.go` for encryption, and `cmd/worldhop/main.go` for how the pieces are wired together.
+
 ### 2.2 Web server lifecycle
 
 The HTTP server runs only while the web view is in use (`api.Lazy`):

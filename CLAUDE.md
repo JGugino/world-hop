@@ -50,5 +50,6 @@ Release builds read a gitignored `.env` and compile IDs in with `-ldflags -X`: `
 
 ## Working notes
 
+- Comments are part of the code. Every package has a package comment, every non-test file a header saying what it is for, and every function and type a doc comment; the Svelte pages and `ui/src/lib/api.ts` follow the same convention. Keep them accurate when behavior changes, and say why, not only what.
 - Rebase on `main` before finishing a branch.
 - Store link for docs and posts: store.gugino.org. Free download: github.com/JGugino/world-hop/releases.

@@ -440,9 +440,10 @@ type indexEntry struct {
 	WorldID string `json:"worldId"`
 }
 
-// PutManifest stores a manifest sealed under its world id and name. The first
-// manifest of a world also records the world in this key generation's index (so
-// ListWorlds can recover the real id on another computer); that step is idempotent.
+// PutManifest stores a manifest sealed under its world id and name. It also
+// records the world in this key generation's index first (so ListWorlds can recover
+// the real id on another computer); an entry that already exists is fine, so that
+// step is idempotent.
 func (s *Store) PutManifest(ctx context.Context, worldID, name string, data []byte) error {
 	if !manifest.ValidID(worldID) || !store.ValidManifestName(name) {
 		return fmt.Errorf("crypt: bad world id or manifest name")

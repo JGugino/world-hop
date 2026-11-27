@@ -1,3 +1,9 @@
+// api.ts: the web view's connection to the WorldHop program. Every call to the local
+// HTTP API (internal/api in the Go code) goes through here, so the pages never build
+// URLs or parse errors themselves. The types describe the JSON the server sends; they
+// are written by hand, so when a Go struct changes its json tags, update the matching
+// type here. docs/technical.md section 2.4 lists the endpoints.
+
 export type ProblemLevel = 'info' | 'warn' | 'error';
 
 /** Something that kept a sync from finishing, in plain words. */
@@ -22,6 +28,10 @@ export type Progress = {
 	total: number;
 };
 
+/**
+ * What GET /api/status returns: whether a sync is running, the last result, what is
+ * being worked on, and the problems that kept the last pass from finishing.
+ */
 export type Status = {
 	state: 'idle' | 'syncing';
 	lastSync: string | null;
@@ -35,6 +45,11 @@ export type Status = {
 	version: string;
 };
 
+/**
+ * How a world compares with the cloud. Mirrors the Go sync.Status values; 'cloud-lost'
+ * means the cloud no longer holds what this computer last saw, and 'unknown' means the
+ * status could not be worked out (see the world's error).
+ */
 export type WorldStatus =
 	| 'no-remote'
 	| 'no-local'
@@ -45,6 +60,9 @@ export type WorldStatus =
 	| 'cloud-lost'
 	| 'unknown';
 
+/**
+ * One world on this computer, as listed on the Worlds tab.
+ */
 export type World = {
 	id: string;
 	name: string;
@@ -77,8 +95,14 @@ export type Lost = {
 	canReupload: boolean;
 };
 
+/**
+ * What the user can choose to do about lost cloud data.
+ */
 export type LostAction = 'accept-cloud' | 'reupload';
 
+/**
+ * A world that is in the cloud but has no copy on this computer.
+ */
 export type CloudWorld = {
 	id: string;
 	name: string;
@@ -92,8 +116,14 @@ export type CloudWorld = {
 	error?: string;
 };
 
+/**
+ * A source is either a saves folder (every world inside) or a single world folder.
+ */
 export type SourceKind = 'saves' | 'world';
 
+/**
+ * A folder the user asked WorldHop to keep synced.
+ */
 export type Source = {
 	kind: SourceKind;
 	path: string;
@@ -103,14 +133,23 @@ export type Source = {
 	error?: string;
 };
 
+/**
+ * How to settle a conflict. Mirrors the Go sync.Strategy values.
+ */
 export type Strategy = 'keep-local' | 'keep-remote' | 'keep-newest' | 'keep-both';
 
+/**
+ * A local snapshot of a world, kept before WorldHop replaced it.
+ */
 export type Snapshot = {
 	id: string;
 	reason: string;
 	createdAt: string | null;
 };
 
+/**
+ * The license state shown on the License tab.
+ */
 export type License = {
 	tier: 'free' | 'pro';
 	freeWorlds: number;
@@ -125,8 +164,14 @@ export type License = {
 	error?: string;
 };
 
+/**
+ * The cloud storage choices.
+ */
 export type ProviderId = 'gdrive' | 's3';
 
+/**
+ * A cloud storage choice as shown on the Cloud account tab.
+ */
 export type Provider = {
 	id: ProviderId;
 	name: string;
@@ -146,6 +191,9 @@ export type Provider = {
 	locked?: boolean;
 };
 
+/**
+ * The saved S3-compatible storage settings. The secret key is never sent to the page.
+ */
 export type S3Config = {
 	endpoint: string;
 	region: string;
@@ -157,11 +205,19 @@ export type S3Config = {
 	hasSecret: boolean;
 };
 
+/**
+ * What the S3 form submits.
+ */
 export type S3Input = Omit<S3Config, 'hasSecret'> & {
 	/** Leave empty to keep the stored secret. */
 	secretKey: string;
 };
 
+/**
+ * Sends a request to the local API and returns the JSON reply. A failed request throws
+ * an Error whose message is the server's plain-language text (and what to do about it,
+ * when it has one), so pages can show it as is.
+ */
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
 	const r = await fetch(url, {
 		method,
@@ -182,49 +238,107 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
 	return r.json();
 }
 
+/**
+ * Current sync status.
+ */
 export const getStatus = () => call<Status>('GET', '/api/status');
+/**
+ * Runs a sync pass over every world now and returns the new status.
+ */
 export const forceSync = () => call<Status>('POST', '/api/sync');
 
+/**
+ * Lists the worlds on this computer with their status.
+ */
 export const getWorlds = () => call<World[]>('GET', '/api/worlds');
+/**
+ * Syncs a single world now.
+ */
 export const syncWorld = (id: string) =>
 	call<Status>('POST', `/api/worlds/${encodeURIComponent(id)}/sync`);
+/**
+ * Carries out the user's choice about lost cloud data.
+ */
 export const resolveLost = (id: string, action: LostAction) =>
 	call<{ action: LostAction; manifest?: string }>(
 		'POST',
 		`/api/worlds/${encodeURIComponent(id)}/lost`,
 		{ action }
 	);
+/**
+ * Settles a conflict with the chosen strategy.
+ */
 export const resolveConflict = (id: string, strategy: Strategy) =>
 	call<{ used: Strategy; copy?: string }>(
 		'POST',
 		`/api/worlds/${encodeURIComponent(id)}/resolve`,
 		{ strategy }
 	);
+/**
+ * Lists a world's local snapshots, newest first.
+ */
 export const getSnapshots = (id: string) =>
 	call<Snapshot[]>('GET', `/api/worlds/${encodeURIComponent(id)}/snapshots`);
+/**
+ * Swaps a snapshot back in as the world (the current one is snapshotted first).
+ */
 export const restoreSnapshot = (id: string, snapshot: string) =>
 	call<void>('POST', `/api/worlds/${encodeURIComponent(id)}/restore`, { snapshot });
 
+/**
+ * Lists worlds that are in the cloud but not on this computer.
+ */
 export const getCloudWorlds = () => call<CloudWorld[]>('GET', '/api/cloud-worlds');
+/**
+ * Downloads a cloud-only world into a saves folder. It never overwrites an existing
+ * folder.
+ */
 export const downloadCloudWorld = (id: string, saves: string) =>
 	call<{ id: string }>('POST', `/api/cloud-worlds/${encodeURIComponent(id)}/download`, { saves });
 
+/**
+ * Lists the configured sources.
+ */
 export const getSources = () => call<Source[]>('GET', '/api/sources');
+/**
+ * Adds a source (a saves folder or a single world).
+ */
 export const addSource = (kind: SourceKind, path: string) =>
 	call<Source[]>('POST', '/api/sources', { kind, path });
 /** Opens the OS folder dialog on this computer. path is '' if cancelled. */
 export const pickFolder = () => call<{ path: string }>('POST', '/api/pick-folder');
+/**
+ * Stops syncing a source. Nothing on disk or in the cloud is deleted.
+ */
 export const removeSource = (kind: SourceKind, path: string) =>
 	call<Source[]>('POST', '/api/sources/remove', { kind, path });
 
+/**
+ * Lists the cloud storage choices and their state.
+ */
 export const getProviders = () => call<Provider[]>('GET', '/api/providers');
+/**
+ * Starts connecting a cloud account (opens the sign-in page for Google Drive).
+ */
 export const linkProvider = (id: ProviderId) =>
 	call<{ url?: string }>('POST', `/api/providers/${id}/link`);
+/**
+ * Forgets the stored sign-in or keys. Cloud data is left alone.
+ */
 export const unlinkProvider = (id: ProviderId) =>
 	call<void>('POST', `/api/providers/${id}/unlink`);
 
+/**
+ * The saved S3 settings.
+ */
 export const getS3 = () => call<S3Config>('GET', '/api/s3');
+/**
+ * Saves S3 settings and keys and makes S3 the storage in use. Pro only.
+ */
 export const saveS3 = (in_: S3Input) => call<S3Config>('PUT', '/api/s3', in_);
+/**
+ * Checks entered S3 settings against the bucket without saving them.
+ */
 export const testS3 = (in_: S3Input) =>
 	call<{ ok: boolean; error?: string }>('POST', '/api/s3/test', in_);
 
@@ -234,12 +348,27 @@ export function sayBye() {
 	navigator.sendBeacon('/api/bye');
 }
 
+/**
+ * The license state.
+ */
 export const getLicense = () => call<License>('GET', '/api/license');
+/**
+ * Verifies a license key with Gumroad and switches to Pro.
+ */
 export const activateLicense = (key: string) =>
 	call<License>('POST', '/api/license/activate', { key });
+/**
+ * Forgets the license key on this computer (back to the free version).
+ */
 export const deactivateLicense = () => call<License>('POST', '/api/license/deactivate');
+/**
+ * Chooses which world the free version syncs.
+ */
 export const setFreeWorld = (id: string) => call<License>('POST', '/api/license/free-world', { id });
 
+/**
+ * The Encryption tab's state.
+ */
 export type Encryption = {
 	/** Pro license active (needed to turn encryption on). */
 	pro: boolean;
@@ -258,6 +387,9 @@ export type Encryption = {
 	error?: string;
 };
 
+/**
+ * A passphrase change in progress or just finished.
+ */
 export type Rekey = {
 	state: 'running' | 'done' | 'failed' | 'cancelled';
 	phase?: 'preparing' | 'copying' | 'finishing';
@@ -268,19 +400,44 @@ export type Rekey = {
 	error?: string;
 };
 
+/**
+ * The encryption state (also carries the progress of a passphrase change).
+ */
 export const getEncryption = () => call<Encryption>('GET', '/api/encryption');
+/**
+ * Turns encryption on: creates the key, or joins an existing one on another computer.
+ */
 export const enableEncryption = (b: {
 	passphrase: string;
 	confirm: string;
 	acknowledged: boolean;
 	remember: boolean;
 }) => call<Encryption>('POST', '/api/encryption/enable', b);
+/**
+ * Enters the passphrase after a restart or a lock.
+ */
 export const unlockEncryption = (passphrase: string, remember: boolean) =>
 	call<Encryption>('POST', '/api/encryption/unlock', { passphrase, remember });
+/**
+ * Forgets the key until the passphrase is entered again.
+ */
 export const lockEncryption = () => call<Encryption>('POST', '/api/encryption/lock');
+/**
+ * Turns encryption off on this computer. Encrypted data in the cloud stays encrypted.
+ */
 export const disableEncryption = () => call<Encryption>('POST', '/api/encryption/disable');
+/**
+ * Writes this computer's saved copy of the newest key information back to the cloud,
+ * after the cloud lost it.
+ */
 export const restoreKeyHeader = () => call<Encryption>('POST', '/api/encryption/restore-key');
+/**
+ * Goes by whatever key information the cloud shows now, after it looked rolled back.
+ */
 export const acceptKeyRollback = () => call<Encryption>('POST', '/api/encryption/accept-key-rollback');
+/**
+ * Starts changing the passphrase: re-encrypts every world in the background.
+ */
 export const changePassphrase = (b: {
 	current: string;
 	passphrase: string;
@@ -288,11 +445,20 @@ export const changePassphrase = (b: {
 	acknowledged: boolean;
 	remember: boolean;
 }) => call<Encryption>('POST', '/api/encryption/change-passphrase', b);
+/**
+ * Stops a passphrase change that is running. Nothing was changed.
+ */
 export const cancelChangePassphrase = () =>
 	call<Encryption>('POST', '/api/encryption/change-passphrase/cancel');
+/**
+ * Clears the result of a finished passphrase change from the page.
+ */
 export const dismissChangePassphrase = () =>
 	call<Encryption>('POST', '/api/encryption/change-passphrase/dismiss');
 
+/**
+ * Whether a newer WorldHop release exists, and where to get it.
+ */
 export type UpdateInfo = {
 	available: boolean;
 	current: string;
@@ -300,4 +466,7 @@ export type UpdateInfo = {
 	/** Release page to open to download the new version. */
 	url?: string;
 };
+/**
+ * Checks whether a newer release is known.
+ */
 export const getUpdate = () => call<UpdateInfo>('GET', '/api/update');
