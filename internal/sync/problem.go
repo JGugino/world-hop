@@ -1,3 +1,13 @@
+// problem.go: turning errors into things a player can act on. The Engine and stores
+// return technical errors; Explain maps them to a Problem with a plain-language title,
+// what to do about it, and the UI page where to do it. Every message the user sees
+// about a failed sync comes from here.
+
+// problem.go: turning errors into things a player can act on. The Engine and stores
+// return technical errors; Explain maps them to a Problem with a plain-language title,
+// what to do about it, and the UI page where to do it. Every message the user sees
+// about a failed sync comes from here.
+
 package sync
 
 import (
@@ -75,6 +85,9 @@ func Explain(err error) Problem {
 	return p
 }
 
+// explain does the matching for Explain: it checks the error against each known
+// kind in a deliberate order (specific sentinel errors first, then HTTP and S3
+// status errors, then general network and disk problems).
 func explain(err error) Problem {
 	var ce *ConflictError
 	var le *LostError
@@ -175,6 +188,8 @@ func explain(err error) Problem {
 		Action: "Try Force sync. If it keeps happening, open Details and include them in a bug report."}
 }
 
+// explainHTTP maps a Google Drive / HTTP status error to a Problem: quota, rate
+// limit, expired sign-in, refused access, server trouble, or a generic rejection.
 func explainHTTP(e *httpx.StatusError) Problem {
 	body := strings.ToLower(e.Body)
 	switch {
@@ -202,6 +217,8 @@ func explainHTTP(e *httpx.StatusError) Problem {
 		Action: "Try Force sync. If it keeps happening, open Details and include them in a bug report."}
 }
 
+// explainS3 maps an S3 error code to a Problem. Most mean the storage settings are
+// wrong (keys, bucket, region) and point the user at the Cloud account tab.
 func explainS3(e *s3.Error) Problem {
 	setup := func(title, action string) Problem {
 		return Problem{Kind: ProblemStorageSetup, Level: LevelError, Title: title, Action: action, Fix: "/cloud"}
@@ -231,18 +248,23 @@ func explainS3(e *s3.Error) Problem {
 		Fix:    "/cloud"}
 }
 
+// quotaProblem is the "your cloud storage is full" problem, shared by Drive and S3.
 func quotaProblem() Problem {
 	return Problem{Kind: ProblemQuota, Level: LevelError,
 		Title:  "Your cloud storage is full",
 		Action: "Free up space in your cloud account (or buy more), then sync again."}
 }
 
+// busyProblem is the "slow down" problem for rate limiting, shared by Drive and S3.
 func busyProblem() Problem {
 	return Problem{Kind: ProblemBusy, Level: LevelError,
 		Title:  "The cloud service is asking WorldHop to slow down",
 		Action: "No action needed. WorldHop will try again shortly."}
 }
 
+// isNetwork reports whether err looks like a connectivity failure (no route, DNS,
+// timeout, connection refused or reset), as opposed to the service answering with
+// an error.
 func isNetwork(err error) bool {
 	var ne net.Error
 	var ue *url.Error
@@ -252,6 +274,8 @@ func isNetwork(err error) bool {
 		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED)
 }
 
+// isDiskFull reports whether err means the disk is out of space (ENOSPC, or
+// Windows' "not enough space" / disk full errors).
 func isDiskFull(err error) bool {
 	var en syscall.Errno
 	if !errors.As(err, &en) {

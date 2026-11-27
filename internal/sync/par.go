@@ -1,3 +1,6 @@
+// par.go: bounded parallelism for store requests. Used wherever the engine fetches or
+// sends many small things at once (manifests, packs).
+
 package sync
 
 import (
@@ -12,7 +15,8 @@ const transferWorkers = 6
 
 // parallel runs fn(i) for i in [0,n) on at most workers goroutines. On the
 // first error it stops starting new work, cancels ctx for the running calls
-// and returns that error.
+// and returns that error. It returns only after every started call has
+// finished, so callers never have work still running behind them.
 func parallel(ctx context.Context, n, workers int, fn func(ctx context.Context, i int) error) error {
 	if n == 0 {
 		return ctx.Err()

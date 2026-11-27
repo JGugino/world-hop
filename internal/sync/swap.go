@@ -1,3 +1,7 @@
+// swap.go: replacing a world folder on disk safely. A world is never half-replaced: the
+// new version is built beside it and swapped in with renames, and a crash mid-swap is
+// repaired by Recover.
+
 package sync
 
 import (
@@ -10,13 +14,21 @@ import (
 )
 
 const (
+	// stagingPrefix names the folder a new version is built in, next to the world
+	// (".worldhopper-staging-<name>"). It exists only while a pull is running.
 	stagingPrefix = ".worldhopper-staging-"
-	oldPrefix     = ".worldhopper-old-"
+	// oldPrefix names the folder the replaced world is moved to during a swap
+	// (".worldhopper-old-<name>"). It exists only for the instant of the swap, or until
+	// the caller turns it into a snapshot.
+	oldPrefix = ".worldhopper-old-"
 )
 
+// stagingPath is where a new version of the world at path is built before swapping.
 func stagingPath(world string) string {
 	return filepath.Join(filepath.Dir(world), stagingPrefix+filepath.Base(world))
 }
+
+// oldPath is where the replaced world at path is parked during a swap.
 func oldPath(world string) string {
 	return filepath.Join(filepath.Dir(world), oldPrefix+filepath.Base(world))
 }
@@ -88,7 +100,8 @@ func Recover(world string) error {
 	return nil
 }
 
-// IsInternalName reports whether a folder name is one of our temp dirs.
+// IsInternalName reports whether a folder name is one of our temp dirs. World
+// discovery uses it so a leftover staging folder is never mistaken for a world.
 func IsInternalName(name string) bool {
 	return strings.HasPrefix(name, stagingPrefix) || strings.HasPrefix(name, oldPrefix)
 }

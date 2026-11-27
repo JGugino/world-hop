@@ -1,3 +1,7 @@
+// cloud.go: worlds that exist in the store but may not exist on this computer. Lists
+// them, describes them for the "Cloud worlds" section of the Worlds tab, and downloads
+// one into a saves folder. Syncing of worlds the user already has lives in engine.go.
+
 package sync
 
 import (
@@ -34,7 +38,8 @@ func (e *Engine) RemoteIDs(ctx context.Context) ([]string, error) {
 	return e.Store.ListWorlds(ctx)
 }
 
-// Remote describes a stored world. ErrNotInStore if it has no manifests.
+// Remote describes a stored world from its newest head. ErrNotInStore if it has no
+// manifests, or a *LostError if the cloud lost versions this computer had seen.
 func (e *Engine) Remote(ctx context.Context, id string) (RemoteWorld, error) {
 	hs, err := e.heads(ctx, id)
 	if err != nil {

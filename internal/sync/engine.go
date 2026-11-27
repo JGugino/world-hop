@@ -1,5 +1,34 @@
-// Package sync implements push, pull, conflict handling, snapshots and the
-// atomic swap on top of any store.Store.
+// Package sync is the heart of WorldHop: it moves worlds between this computer and
+// the store (the user's cloud), and decides what is safe to do.
+//
+// How the files divide the work:
+//
+//   - engine.go: the Engine. Status, Push, Pull, Resolve (conflicts), and the "last
+//     synced" records. Everything else in the package serves it.
+//   - scan.go / tree.go: look at a local world's files (with a stat cache so an
+//     unchanged world is cheap) and hash the result into a tree hash.
+//   - upload.go / materialize.go: the two data paths. upload packs chunks and sends
+//     them; materialize builds a stored version back into a folder, verifying hashes.
+//   - swap.go / snapshot.go: replace a world on disk atomically, keep the old one as a
+//     local snapshot, and recover after a crash mid-swap.
+//   - lost.go: notice when the cloud has lost or rolled back data, and let the user
+//     choose what to do about it. Nothing is ever repaired automatically.
+//   - cloud.go: worlds that exist in the store but not on this computer, and
+//     downloading them.
+//   - runner.go / runner_worlds.go: the Runner, which runs a whole pass over all
+//     worlds for the tray and the web view, and keeps the status the UI shows.
+//   - scheduler.go: decides when a pass runs (startup, every 10 minutes, after a
+//     world closes).
+//   - problem.go / headline.go: turn errors into plain-language problems and a
+//     one-line status headline.
+//   - par.go: a small bounded-parallelism helper.
+//
+// The key ideas, in short: a world is a set of immutable versions (manifests); the
+// newest versions that no other version supersedes are the "heads"; one head is a
+// clean history, several heads are a conflict; each computer remembers which
+// version it last synced (state) and compares that with its local files and the
+// heads to choose between push, pull, or "ask the user". See docs/technical.md
+// section 3 for the full model.
 package sync
 
 import (
@@ -21,6 +50,10 @@ import (
 	"github.com/JGugino/world-hopper/internal/worlds"
 )
 
+// packTarget is the size at which uploads flush a pack. Chunks are appended to an
+// in-memory buffer until it reaches about this size, then sent as one pack file;
+// fewer, larger files are much cheaper to upload to Drive or S3 than one file per
+// chunk.
 const packTarget = 16 << 20 // flush a pack at about 16 MiB
 
 var (
@@ -38,10 +71,25 @@ type ConflictError struct {
 	Heads   []string
 }
 
+// Error implements error, naming the world and how many stored versions diverged.
 func (e *ConflictError) Error() string {
 	return fmt.Sprintf("conflict on world %q: local changes and %d stored version(s) diverged", e.WorldID, len(e.Heads))
 }
 
+// Engine syncs worlds between this computer and a store.Store. It holds no
+// world data itself, only configuration and small caches under StateDir:
+//
+//	worlds/<id>.json      which version this computer last synced (see state)
+//	manifests/<id>/...    every version downloaded or pushed, kept for fast
+//	                      listing and for noticing when the cloud loses one
+//	cache/<id>.json       the stat cache that makes scanning an unchanged world cheap
+//	snapshots/<id>/...    local copies of worlds before they were replaced
+//
+// The Store is normally the crypt.Manager wrapping the link.Manager (so
+// encryption and the chosen cloud account are transparent here). Create one with
+// New and set the optional hooks (IsOpen, Authorize, StateScope, ...) before use.
+// An Engine is safe for concurrent use for different worlds; the Runner makes
+// sure only one sync pass runs at a time.
 type Engine struct {
 	Store         store.Store
 	StateDir      string // per-device state and snapshots
@@ -66,6 +114,8 @@ type Engine struct {
 	lost lostData // worlds whose stored versions need packs the cloud lost
 }
 
+// phase tells the OnPhase hook (if any) that data is starting to move for a world,
+// so the UI can show "uploading" or "downloading".
 func (e *Engine) phase(worldID, phase string) {
 	if e.OnPhase != nil {
 		e.OnPhase(worldID, phase)
@@ -93,6 +143,7 @@ func New(st store.Store, stateDir string) (*Engine, error) {
 	return &Engine{Store: st, StateDir: stateDir, DeviceID: id, SnapshotsKeep: 5, Now: time.Now}, nil
 }
 
+// now is the engine's clock, in UTC. Tests set Now to make times deterministic.
 func (e *Engine) now() time.Time {
 	if e.Now != nil {
 		return e.Now().UTC()
@@ -102,11 +153,18 @@ func (e *Engine) now() time.Time {
 
 // ---- local state ----
 
+// state is this computer's memory of one world's last sync: which stored version
+// (manifest name) it matched, and that version's tree hash. Comparing it with the
+// current local tree hash tells whether local files changed since; comparing the
+// Base with the store's heads tells whether the cloud moved. It lives in
+// StateDir/worlds/<id>.json.
 type state struct {
 	Base     string `json:"base"`     // manifest name last synced with
 	BaseTree string `json:"baseTree"` // its tree hash
 }
 
+// statePath is where a world's state file lives. When encryption is on, StateScope
+// adds a sub-folder so the plain and encrypted layouts never share records.
 func (e *Engine) statePath(id string) string {
 	dir := filepath.Join(e.StateDir, "worlds")
 	if e.StateScope != nil {
@@ -117,6 +175,8 @@ func (e *Engine) statePath(id string) string {
 	return filepath.Join(dir, id+".json")
 }
 
+// loadState reads a world's state. A missing or unreadable file is an empty state,
+// which the status logic treats as "never synced".
 func (e *Engine) loadState(id string) state {
 	var s state
 	if b, err := os.ReadFile(e.statePath(id)); err == nil {
@@ -125,6 +185,8 @@ func (e *Engine) loadState(id string) state {
 	return s
 }
 
+// saveState records a world's state. It writes a temp file and renames it so a
+// crash can't leave a half-written state file.
 func (e *Engine) saveState(id string, s state) error {
 	p := e.statePath(id)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -140,17 +202,19 @@ func (e *Engine) saveState(id string, s state) error {
 
 // ---- store helpers ----
 
+// head is one head version of a world: the manifest and its store name.
 type head struct {
 	Name string
 	M    *manifest.Manifest
 }
 
-// heads returns manifests that no other manifest lists as a parent.
+// heads returns the manifests no other manifest lists as a parent.
 //
 // Manifests are immutable and named by generation and device, so each one is
 // kept on this computer after its first download: a pass normally costs one
 // listing request, and only manifests written since the last pass are fetched
-// (concurrently).
+// (concurrently). It returns a *LostError instead if the cloud no longer lists a
+// version this computer has seen (see lost.go).
 func (e *Engine) heads(ctx context.Context, id string) ([]head, error) {
 	return e.headsOpt(ctx, id, false)
 }
@@ -234,6 +298,8 @@ func (e *Engine) headsOpt(ctx context.Context, id string, ignoreLost bool) ([]he
 	return hs, nil
 }
 
+// scoped returns a state sub-directory (such as "manifests" or "cache") for the
+// current layout: the plain one, or the encrypted one if StateScope says so.
 func (e *Engine) scoped(dir string) string {
 	if e.StateScope != nil {
 		if sc := e.StateScope(); sc != "" {
@@ -243,6 +309,7 @@ func (e *Engine) scoped(dir string) string {
 	return filepath.Join(e.StateDir, dir)
 }
 
+// manifestCachePath is where a downloaded or pushed manifest is kept locally.
 func (e *Engine) manifestCachePath(id, name string) string {
 	return filepath.Join(e.scoped("manifests"), id, name)
 }
@@ -260,6 +327,10 @@ func (e *Engine) cachedManifest(id, name string) *manifest.Manifest {
 	return m
 }
 
+// cacheManifest saves a manifest locally. Manifests never change, so a saved copy
+// is valid forever; the set of saved names is also this computer's record of which
+// versions it has seen (see lost.go). Failing to cache is harmless (it is only an
+// optimisation), so errors are ignored.
 func (e *Engine) cacheManifest(id, name string, m *manifest.Manifest) {
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -275,10 +346,15 @@ func (e *Engine) cacheManifest(id, name string, m *manifest.Manifest) {
 	}
 }
 
+// statCache loads the world's scan cache (file sizes and times mapped to chunk
+// hashes) so rescanning an unchanged world doesn't re-read every file.
 func (e *Engine) statCache(id string) *statCache {
 	return loadStatCache(filepath.Join(e.scoped("cache"), id+".json"))
 }
 
+// loadManifest downloads and checks a manifest: it must parse, belong to this
+// world, and match the name it was stored under (so a provider can't hand back a
+// different version under a name).
 func (e *Engine) loadManifest(ctx context.Context, id, name string) (*manifest.Manifest, error) {
 	b, err := e.Store.GetManifest(ctx, id, name)
 	if err != nil {
@@ -294,6 +370,7 @@ func (e *Engine) loadManifest(ctx context.Context, id, name string) (*manifest.M
 	return m, nil
 }
 
+// headNames returns the heads' names sorted, for errors and comparisons.
 func headNames(hs []head) []string {
 	var n []string
 	for _, h := range hs {
@@ -314,6 +391,8 @@ func (e *Engine) check(w worlds.World) error {
 	return e.checkOpen(w)
 }
 
+// checkOpen refuses (ErrWorldOpen) if the game has the world open. Syncing a world
+// the game is writing to risks corruption.
 func (e *Engine) checkOpen(w worlds.World) error {
 	if e.IsOpen != nil && e.IsOpen(w.Path) {
 		return ErrWorldOpen
@@ -323,6 +402,8 @@ func (e *Engine) checkOpen(w worlds.World) error {
 
 // ---- status ----
 
+// Status says how a local world compares with the store. It is what the Worlds tab
+// shows and what Sync decides from.
 type Status string
 
 const (
@@ -338,8 +419,8 @@ const (
 )
 
 // view is one look at a world: the stored heads and the local files. Every
-// operation takes exactly one, so a pass reads the store's manifests once and
-// the world's files once.
+// operation takes exactly one, so a pass reads the store's manifests once and the
+// world's files once, and decisions are made from a consistent snapshot of both.
 type view struct {
 	hs     []head
 	exists bool
@@ -348,7 +429,9 @@ type view struct {
 }
 
 // look gathers the heads and scans the local world at the same time (one is
-// network time, the other disk time).
+// network time, the other disk time) and returns them as a view. It returns an
+// error if the store can't be read, a *LostError if the cloud lost versions this
+// computer had seen, or a scan error.
 func (e *Engine) look(ctx context.Context, w worlds.World) (*view, error) {
 	v := &view{exists: worlds.IsWorld(w.Path)}
 	var scanErr error
@@ -374,6 +457,10 @@ func (e *Engine) look(ctx context.Context, w worlds.World) (*view, error) {
 	return v, nil
 }
 
+// status is Status for a view already taken. With nothing stored and nothing local
+// there is nothing to do; with nothing stored but a local world it is a first
+// upload; with stored versions but no local world it is cloud-only; otherwise
+// classify compares the three-way state.
 func (e *Engine) status(w worlds.World, v *view) Status {
 	switch {
 	case len(v.hs) == 0 && !v.exists:
@@ -386,7 +473,9 @@ func (e *Engine) status(w worlds.World, v *view) Status {
 	return e.classify(w.ID, v.hs, v.tree)
 }
 
-// Status compares the local world with the store without changing anything.
+// Status compares the local world with the store without changing anything. It
+// returns StatusCloudLost (not an error) when the cloud lost data, so the Worlds
+// tab can show what to do about it.
 func (e *Engine) Status(ctx context.Context, w worlds.World) (Status, error) {
 	v, err := e.look(ctx, w)
 	var le *LostError
@@ -402,6 +491,18 @@ func (e *Engine) Status(ctx context.Context, w worlds.World) (Status, error) {
 	return e.status(w, v), nil
 }
 
+// classify is the three-way comparison at the centre of syncing. It uses:
+//
+//   - the local tree hash (what is on disk now),
+//   - this computer's state (the version it last synced and that version's hash),
+//   - the store's heads (what is in the cloud now).
+//
+// Local changed = the local tree differs from the last-synced tree (or never
+// synced). Remote moved = the heads are not exactly the last-synced version.
+// Only local changed is local-ahead; only remote moved (one head) is
+// remote-ahead; both, or several heads, is a conflict. An identical single head is
+// simply synced. Nothing here ever decides to overwrite: a conflict is reported
+// and left for the user.
 func (e *Engine) classify(id string, hs []head, local string) Status {
 	if len(hs) == 0 {
 		return StatusLocalAhead
@@ -468,13 +569,16 @@ func (e *Engine) Sync(ctx context.Context, w worlds.World) (SyncResult, error) {
 
 // ---- push ----
 
+// PushResult is what a push did.
 type PushResult struct {
 	Manifest string
 	Pushed   bool // false when there was nothing to upload
 	NewBytes int64
 }
 
-// Push uploads the local world as a new manifest. It refuses on conflict.
+// Push uploads the local world as a new version. It refuses if a newer stored
+// version exists (ErrBehind), on conflict, if the world is open, or if the cloud
+// lost data. Use Sync to let the engine decide between push and pull.
 func (e *Engine) Push(ctx context.Context, w worlds.World) (PushResult, error) {
 	if err := e.check(w); err != nil {
 		return PushResult{}, err
@@ -529,6 +633,17 @@ type uploadOpts struct {
 	minGen int64
 }
 
+// uploadWith writes packs, then a manifest whose parents are hs. sc is a scan of
+// the world taken just before; only files holding chunks the store does not
+// already have are read again.
+//
+// The order matters for safety: chunks are packed and uploaded first, and the
+// manifest (the thing other computers look for) is written last, so an
+// interrupted upload is invisible and leaves only unused packs behind. Chunks that
+// earlier versions already stored are reused instead of re-uploaded, but only after
+// checking their packs still exist, so a manifest is never written that points at
+// missing data. The new version's generation is one past the highest parent, and its
+// parents are all the heads it saw, which is what makes it supersede them.
 func (e *Engine) uploadWith(ctx context.Context, w worlds.World, hs []head, sc *scanResult, opts uploadOpts) (PushResult, error) {
 	e.phase(w.ID, "uploading")
 	known := map[string]manifest.ChunkLoc{}
@@ -667,6 +782,8 @@ func (e *Engine) uploadWith(ctx context.Context, w worlds.World, hs []head, sc *
 
 // ---- pull ----
 
+// PullResult is what a pull did: the version it landed on, whether the world
+// changed, and the snapshot id of the replaced world if there was one.
 type PullResult struct {
 	Manifest string
 	Updated  bool
@@ -674,7 +791,8 @@ type PullResult struct {
 }
 
 // Pull brings the newest stored version to this computer. It refuses when the
-// world is open or on conflict.
+// world is open, on conflict, or if the cloud lost data. With no local world it
+// creates one; with a local world that is already current it does nothing.
 func (e *Engine) Pull(ctx context.Context, w worlds.World) (PullResult, error) {
 	if err := e.check(w); err != nil {
 		return PullResult{}, err
@@ -705,9 +823,11 @@ func (e *Engine) Pull(ctx context.Context, w worlds.World) (PullResult, error) {
 	return PullResult{}, &ConflictError{w.ID, headNames(hs)}
 }
 
-// apply builds h in a staging dir (reusing local data, downloading the rest),
-// verifies every hash, then swaps it in atomically, keeping the replaced world
-// as a snapshot.
+// apply builds h in a staging folder (reusing local data, downloading the rest),
+// verifies every hash, then swaps it in atomically, keeping the replaced world as a
+// snapshot. If a pack the version needs is gone it stops with a *LostError and
+// leaves the world untouched; it never fills the gap from whatever is on this
+// computer.
 func (e *Engine) apply(ctx context.Context, w worlds.World, h head, reason string) (PullResult, error) {
 	e.phase(w.ID, "downloading")
 	staging := stagingPath(w.Path)
@@ -753,6 +873,8 @@ func (e *Engine) apply(ctx context.Context, w worlds.World, h head, reason strin
 
 // ---- conflict resolution ----
 
+// Strategy is how the user chose to settle a conflict. Nothing ever picks one
+// automatically.
 type Strategy string
 
 const (
@@ -762,13 +884,24 @@ const (
 	KeepBoth   Strategy = "keep-both"   // local copied to a new world folder, then stored wins
 )
 
+// ResolveResult reports which strategy ran (KeepNewest resolves to one of the
+// others), the manifest written, and the copy's path for KeepBoth.
 type ResolveResult struct {
 	Used     Strategy
 	Manifest string
 	Copy     string // path of the preserved copy for KeepBoth
 }
 
-// Resolve settles a conflict. Cancelling is simply not calling Resolve.
+// Resolve settles a conflict with the user's chosen strategy. Cancelling is simply
+// not calling Resolve; until then nothing is changed.
+//
+// KeepLocal uploads the local world with every head as a parent, so it supersedes
+// them. KeepRemote applies the newest head (writing a merge manifest first when
+// there are several heads, so the losing ones stop being heads) and snapshots the
+// local world. KeepBoth first copies the local world to a "(conflict copy ...)"
+// folder, then does KeepRemote. KeepNewest compares the local files' newest
+// modification time with the newest head and picks one of the first two. With no
+// local world only KeepRemote makes sense, so that is what runs.
 func (e *Engine) Resolve(ctx context.Context, w worlds.World, s Strategy) (ResolveResult, error) {
 	if err := e.check(w); err != nil {
 		return ResolveResult{}, err

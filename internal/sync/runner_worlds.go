@@ -1,3 +1,13 @@
+// runner_worlds.go: what the Worlds tab needs from the Runner. Lists worlds with their
+// status, runs the actions the user can choose (sync one world, resolve a conflict or
+// lost data, restore a snapshot), and handles cloud-only worlds. Each action takes the
+// pass lock so it never races a sync pass.
+
+// runner_worlds.go: what the Worlds tab needs from the Runner. Lists worlds with their
+// status, runs the actions the user can choose (sync one world, resolve a conflict or
+// lost data, restore a snapshot), and handles cloud-only worlds. Each action takes the
+// pass lock so it never races a sync pass.
+
 package sync
 
 import (
@@ -91,6 +101,7 @@ func (r *Runner) Worlds(ctx context.Context) []WorldInfo {
 	return out
 }
 
+// find looks a world up by id among the currently configured sources.
 func (r *Runner) find(id string) (worlds.World, error) {
 	for _, w := range r.listWorlds() {
 		if w.ID == id {
@@ -225,6 +236,8 @@ func (r *Runner) CloudWorlds(ctx context.Context) ([]CloudWorld, error) {
 	return out, nil
 }
 
+// savesFolders returns the configured saves folders (the only places a cloud world
+// may be downloaded into), or none if not set.
 func (r *Runner) savesFolders() []string {
 	if r.SavesFolders == nil {
 		return nil
@@ -257,6 +270,8 @@ func (r *Runner) DownloadWorld(ctx context.Context, id, savesPath string) (PullR
 	return r.engine.Download(ctx, id, savesPath)
 }
 
+// canAutoDownload reports whether automatic download is on and there is exactly one
+// saves folder to put new worlds in. With several folders the choice is the user's.
 func (r *Runner) canAutoDownload() bool {
 	return r.AutoDownload && len(r.savesFolders()) == 1
 }

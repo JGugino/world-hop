@@ -1,3 +1,13 @@
+// runner.go: the Runner. Where the Engine syncs one world, the Runner runs a whole pass
+// over every world, one pass at a time, and keeps the status the tray tooltip and the
+// web view's status panel show. The per-world actions the web view offers (resolve,
+// restore, download...) are in runner_worlds.go.
+
+// runner.go: the Runner. Where the Engine syncs one world, the Runner runs a whole pass
+// over every world, one pass at a time, and keeps the status the tray tooltip and the
+// web view's status panel show. The per-world actions the web view offers (resolve,
+// restore, download...) are in runner_worlds.go.
+
 package sync
 
 import (
@@ -101,6 +111,7 @@ func (r *Runner) setPhase(_, phase string) {
 	}
 }
 
+// setProgress records which world the running pass is on (nil when idle).
 func (r *Runner) setProgress(p *Progress) {
 	r.mu.Lock()
 	r.status.Progress = p
@@ -139,6 +150,9 @@ func (r *Runner) SyncAll(ctx context.Context) RunnerStatus {
 	return r.runPass(ctx, r.listWorlds(), true)
 }
 
+// listWorlds returns the worlds to sync right now. The list is re-resolved from the
+// configured sources on every call, so new worlds and source edits are picked up
+// without a restart.
 func (r *Runner) listWorlds() []worlds.World {
 	if r.list == nil {
 		return nil
@@ -198,6 +212,8 @@ type problemList struct {
 	idx  map[string]int
 }
 
+// add records a problem for a world (or for no world in particular, with an empty
+// name). The first problem of a kind is kept; later ones only add their world.
 func (l *problemList) add(p Problem, world string) {
 	if l.idx == nil {
 		l.idx = map[string]int{}
@@ -214,6 +230,11 @@ func (l *problemList) add(p Problem, world string) {
 	}
 }
 
+// run does the actual work of a pass: for each world it calls Engine.Sync and
+// sorts the result into counts, problems and warnings. A problem that would hit every
+// world the same way (see globalKinds) stops the pass immediately. A full pass also
+// fetches cloud-only worlds (autoDownload). It never decides to resolve a conflict or
+// repair lost data; those become problems for the user.
 func (r *Runner) run(ctx context.Context, ws []worlds.World, full bool) passOutcome {
 	if r.engine == nil {
 		return passOutcome{message: "No sync store configured yet.", outcome: "attention",
@@ -278,6 +299,9 @@ func (r *Runner) run(ctx context.Context, ws []worlds.World, full bool) passOutc
 	}
 }
 
+// outcomeOf summarises a list of problems as one outcome: "error" if any failed,
+// "attention" if any needs a choice, "waiting" if there are only informational
+// ones (like a world that is open), otherwise "ok".
 func outcomeOf(ps []Problem) string {
 	out := "ok"
 	for _, p := range ps {
@@ -293,6 +317,7 @@ func outcomeOf(ps []Problem) string {
 	return out
 }
 
+// plural formats a count with the right noun ("1 world", "2 worlds").
 func plural(n int, one, many string) string {
 	if n == 1 {
 		return fmt.Sprintf("%d %s", n, one)

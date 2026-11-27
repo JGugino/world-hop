@@ -1,3 +1,8 @@
+// materialize.go: the download path. Builds a stored version (a manifest) back into a
+// folder of real files, verifying every byte on the way. It never touches the live
+// world: Engine.apply points it at an empty staging folder and swaps the result in only
+// if everything checked out.
+
 package sync
 
 import (
@@ -13,6 +18,9 @@ import (
 	"github.com/JGugino/world-hopper/internal/manifest"
 )
 
+// placement says where one chunk goes: which file (index into the manifest's
+// Files) and the byte offset inside it. A chunk that appears several times (same
+// data in two places) has several placements.
 type placement struct {
 	file int   // index into the manifest's Files
 	off  int64 // offset of the chunk inside that file
@@ -206,7 +214,9 @@ func (e *Engine) materialize(ctx context.Context, m *manifest.Manifest, dir, loc
 }
 
 // cacheFromManifest describes the files of a freshly built world dir in stat
-// cache form, so the first scan after a pull is a stat-only pass.
+// cache form, so the first scan after a pull is a stat-only pass. Files whose
+// modification time is too recent to trust (see racyWindow) are left out and will
+// simply be hashed next time.
 func cacheFromManifest(m *manifest.Manifest, dir string) map[string]localFile {
 	out := make(map[string]localFile, len(m.Files))
 	cutoff := time.Now().Add(-racyWindow)
