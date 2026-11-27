@@ -86,7 +86,7 @@ terms.
 
 ## 10. General
 
-These terms are governed by the laws of [GOVERNING LAW / JURISDICTION: replace before publishing],
+These terms are governed by the laws of the State of New York, United States,
 without regard to conflict-of-law rules. If a provision is unenforceable, the rest remains in effect.
 
 ## 11. Contact
