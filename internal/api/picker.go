@@ -1,3 +1,5 @@
+// picker.go: the native folder dialog the Saves tab uses to choose a folder.
+
 package api
 
 import (

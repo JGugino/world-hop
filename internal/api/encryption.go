@@ -1,3 +1,5 @@
+// encryption.go: the Encryption tab's endpoints.
+
 package api
 
 import (

@@ -198,4 +198,5 @@ func TreeHash(files []File) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// TreeHash is the TreeHash of this manifest's files.
 func (m *Manifest) TreeHash() string { return TreeHash(m.Files) }

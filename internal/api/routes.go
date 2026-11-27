@@ -1,3 +1,7 @@
+// routes.go: the settings and world endpoints, and the small interfaces (SourceStore,
+// Providers, Licenser, Encrypter, Updater) that keep this package independent of the
+// packages that implement them.
+
 package api
 
 import (
