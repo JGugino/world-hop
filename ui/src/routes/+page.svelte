@@ -14,6 +14,8 @@ seconds and right after a sync finishes.
 		resolveConflict,
 		resolveLost,
 		getSnapshots,
+		getCloudVersions,
+		restoreCloudVersion,
 		restoreSnapshot,
 		getCloudWorlds,
 		getSources,
@@ -22,6 +24,7 @@ seconds and right after a sync finishes.
 		type World,
 		type WorldStatus,
 		type Snapshot,
+		type CloudVersion,
 		type Strategy,
 		type LostAction
 	} from '$lib/api';
@@ -37,6 +40,8 @@ seconds and right after a sync finishes.
 	let openSnaps = $state<string | null>(null);
 	let snaps = $state<Snapshot[]>([]);
 	let confirmRestore = $state<string | null>(null);
+	let cloudVersions = $state<CloudVersion[]>([]);
+	let versionsError = $state('');
 
 	// labels and tone: the text and colour of each world's status badge.
 	const labels: Record<WorldStatus, string> = {
@@ -173,8 +178,33 @@ seconds and right after a sync finishes.
 			openSnaps = w.id;
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
+			return;
+		}
+		await loadCloudVersions(w);
+	}
+
+	// loadCloudVersions fetches the versions the cloud holds. A failure (offline, no
+	// account) only affects that list, so the local snapshots still show.
+	async function loadCloudVersions(w: World) {
+		versionsError = '';
+		try {
+			cloudVersions = await getCloudVersions(w.id);
+		} catch (e) {
+			cloudVersions = [];
+			versionsError = e instanceof Error ? e.message : String(e);
 		}
 	}
+
+	// restoreCloud puts an older cloud version on this computer; the current world is
+	// snapshotted first, and the next sync uploads the result as a new version.
+	const restoreCloud = (w: World, v: CloudVersion) =>
+		run(w.id, async () => {
+			await restoreCloudVersion(w.id, v.id);
+			confirmRestore = null;
+			notice = `${w.name}: restored the version from ${when(v.createdAt)}. The next sync uploads it as a new version.`;
+			snaps = await getSnapshots(w.id);
+			await loadCloudVersions(w);
+		});
 
 	// restore swaps a snapshot back in; the current world is snapshotted first by the
 	// server so this can be undone.
@@ -384,6 +414,7 @@ seconds and right after a sync finishes.
 
 			{#if openSnaps === w.id}
 				<div class="snaps">
+					<h4>On this computer</h4>
 					{#if snaps.length === 0}
 						<p class="muted small">
 							No snapshots yet. One is saved automatically before any sync overwrites this world.
@@ -405,6 +436,40 @@ seconds and right after a sync finishes.
 										</span>
 									{:else}
 										<button class="secondary" disabled={w.open} onclick={() => (confirmRestore = s.id)}>
+											Restore
+										</button>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					{/if}
+
+					<h4>In the cloud</h4>
+					{#if versionsError}
+						<p class="muted small">Can’t reach the cloud versions: {versionsError}</p>
+					{:else if cloudVersions.length === 0}
+						<p class="muted small">Nothing uploaded yet.</p>
+					{:else}
+						<ul>
+							{#each cloudVersions as v (v.id)}
+								<li>
+									<span>
+										{when(v.createdAt)}
+										<span class="muted small">
+											· {v.files} files{v.current ? ' · current' : ''}{v.mine ? ' · this computer' : ''}
+										</span>
+									</span>
+									{#if v.current}
+										<!-- already what everyone gets; nothing to restore -->
+									{:else if confirmRestore === 'cloud:' + v.id}
+										<span class="row">
+											<button class="danger" disabled={w.open || busy === w.id} onclick={() => restoreCloud(w, v)}>
+												Replace current world
+											</button>
+											<button class="secondary" onclick={() => (confirmRestore = null)}>Cancel</button>
+										</span>
+									{:else}
+										<button class="secondary" disabled={w.open} onclick={() => (confirmRestore = 'cloud:' + v.id)}>
 											Restore
 										</button>
 									{/if}
@@ -436,6 +501,7 @@ seconds and right after a sync finishes.
 	.confirm { border: 2px solid #000; border-left: 6px solid var(--warn); background: #00000040; padding: 2px 14px 10px; margin-top: 10px; }
 	.conflict ul { padding-left: 18px; margin: 8px 0 0; }
 	.snaps { margin-top: 12px; border: 2px solid #000; background: #111315; box-shadow: inset 2px 2px 0 #000; padding: 4px 12px; }
+	.snaps h4 { margin: 10px 0 2px; font-size: 0.95rem; }
 	.snaps ul { list-style: none; margin: 0; padding: 0; }
 	.snaps li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; flex-wrap: wrap; }
 	.cloud { list-style: none; margin: 8px 0 0; padding: 0; }

@@ -195,6 +195,32 @@ func (d *Dir) ListWorlds(_ context.Context) ([]string, error) {
 	return out, nil
 }
 
+var _ store.Remover = (*Dir)(nil)
+
+// DeletePack removes a pack file; a pack that is already gone is fine.
+func (d *Dir) DeletePack(_ context.Context, name string) error {
+	p, err := d.packPath(name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// DeleteManifest removes one manifest file; one that is already gone is fine.
+func (d *Dir) DeleteManifest(_ context.Context, world, name string) error {
+	p, err := d.manifestPath(world, name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 // readFile reads a file, turning "does not exist" into store.ErrNotFound.
 func readFile(p string) ([]byte, error) {
 	b, err := os.ReadFile(p)

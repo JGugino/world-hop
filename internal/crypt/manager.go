@@ -546,3 +546,31 @@ func (m *Manager) ListWorlds(ctx context.Context) ([]string, error) {
 	}
 	return out, nil
 }
+
+var _ store.Remover = (*Manager)(nil)
+
+// DeletePack removes a pack through the current store (see PutPack).
+func (m *Manager) DeletePack(ctx context.Context, name string) error {
+	s, err := m.current(ctx)
+	if err != nil {
+		return err
+	}
+	rm, ok := s.(store.Remover)
+	if !ok {
+		return store.ErrUnsupported
+	}
+	return rm.DeletePack(ctx, name)
+}
+
+// DeleteManifest removes a manifest through the current store (see PutPack).
+func (m *Manager) DeleteManifest(ctx context.Context, worldID, name string) error {
+	s, err := m.current(ctx)
+	if err != nil {
+		return err
+	}
+	rm, ok := s.(store.Remover)
+	if !ok {
+		return store.ErrUnsupported
+	}
+	return rm.DeleteManifest(ctx, worldID, name)
+}

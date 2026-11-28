@@ -78,4 +78,28 @@ func Contract(t *testing.T, s store.Store) {
 	if l, err := s.ListWorlds(ctx); err != nil || len(l) != 2 || l[0] != "W1" || l[1] != "W2" {
 		t.Fatalf("ListWorlds = %v %v, want [W1 W2]", l, err)
 	}
+
+	if rm, ok := s.(store.Remover); ok { // optional: cloud cleanup
+		if err := rm.DeleteManifest(ctx, "W1", n1); err != nil {
+			t.Fatalf("DeleteManifest: %v", err)
+		}
+		if err := rm.DeleteManifest(ctx, "W1", n1); err != nil {
+			t.Fatalf("DeleteManifest twice must be fine: %v", err)
+		}
+		if l, _ := s.ListManifests(ctx, "W1"); len(l) != 2 || l[0] != n2 || l[1] != n3 {
+			t.Fatalf("after delete ListManifests = %v", l)
+		}
+		if l, _ := s.ListManifests(ctx, "W2"); len(l) != 1 {
+			t.Fatalf("delete touched another world: %v", l)
+		}
+		if err := rm.DeletePack(ctx, pack); err != nil {
+			t.Fatalf("DeletePack: %v", err)
+		}
+		if err := rm.DeletePack(ctx, pack); err != nil {
+			t.Fatalf("DeletePack twice must be fine: %v", err)
+		}
+		if _, err := s.GetPack(ctx, pack); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("GetPack after delete: %v", err)
+		}
+	}
 }

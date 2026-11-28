@@ -1,5 +1,5 @@
-// Package config persists the user's settings (currently the list of sync
-// sources) in a small JSON file (config.json). The other state files
+// Package config persists the user's settings (the list of sync sources and how
+// many snapshots to keep in the cloud) in a small JSON file (config.json). The other state files
 // (provider.json, license.json, encryption.json, ...) belong to the managers that own
 // them; this one is the Saves tab's list of what to keep synced.
 package config
@@ -16,17 +16,31 @@ import (
 	"github.com/JGugino/world-hopper/internal/worlds"
 )
 
-// file is the on-disk shape.
+// Bounds of the "snapshots kept in the cloud" setting: how many of each world's
+// newest versions cloud cleanup keeps. It is never lower than MinCloudSnapshots, so
+// there is always something to go back to.
+const (
+	MinCloudSnapshots     = 2
+	DefaultCloudSnapshots = 5
+	MaxCloudSnapshots     = 50
+)
+
+// ErrCloudSnapshots: the value is outside MinCloudSnapshots..MaxCloudSnapshots.
+var ErrCloudSnapshots = fmt.Errorf("keep between %d and %d snapshots", MinCloudSnapshots, MaxCloudSnapshots)
+
+// file is the on-disk shape. CloudSnapshots 0 (an older file) means the default.
 type file struct {
-	Sources []worlds.Source `json:"sources"`
+	Sources        []worlds.Source `json:"sources"`
+	CloudSnapshots int             `json:"cloudSnapshots,omitempty"`
 }
 
 // Config is the settings file. It is safe for concurrent use.
 type Config struct {
 	path string
 
-	mu      sync.Mutex
-	sources []worlds.Source
+	mu             sync.Mutex
+	sources        []worlds.Source
+	cloudSnapshots int
 }
 
 // Load reads the config at path. A missing file is not an error: it returns
@@ -45,7 +59,36 @@ func Load(path string) (c *Config, fresh bool, err error) {
 		return nil, false, fmt.Errorf("read %s: %w", path, err)
 	}
 	c.sources = f.Sources
+	c.cloudSnapshots = f.CloudSnapshots
 	return c, false, nil
+}
+
+// CloudSnapshots is how many versions of each world to keep in the cloud (the
+// default when never set, and never below the minimum).
+func (c *Config) CloudSnapshots() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cloudSnapshots < MinCloudSnapshots {
+		return DefaultCloudSnapshots
+	}
+	return c.cloudSnapshots
+}
+
+// SetCloudSnapshots saves the number of versions to keep per world in the cloud.
+// Values outside the allowed range are refused with ErrCloudSnapshots.
+func (c *Config) SetCloudSnapshots(n int) error {
+	if n < MinCloudSnapshots || n > MaxCloudSnapshots {
+		return ErrCloudSnapshots
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	old := c.cloudSnapshots
+	c.cloudSnapshots = n
+	if err := c.saveLocked(); err != nil {
+		c.cloudSnapshots = old
+		return err
+	}
+	return nil
 }
 
 // Sources returns a copy of the configured sources.
@@ -163,7 +206,7 @@ outer:
 // saveLocked writes the config atomically (temp file and rename). The caller holds
 // c.mu.
 func (c *Config) saveLocked() error {
-	b, err := json.MarshalIndent(file{Sources: c.sources}, "", "  ")
+	b, err := json.MarshalIndent(file{Sources: c.sources, CloudSnapshots: c.cloudSnapshots}, "", "  ")
 	if err != nil {
 		return err
 	}

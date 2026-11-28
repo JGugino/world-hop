@@ -175,8 +175,9 @@ func TestS3UnlinkForgetsEverything(t *testing.T) {
 	e := newS3Env(t, true)
 	e.m.SaveS3(e.input())
 	e.m.PutPack(context.Background(), strings.Repeat("ab", 32), []byte("x"))
-	if err := e.m.Unlink(S3); err != nil {
-		t.Fatal(err)
+	rev, err := e.m.Unlink(S3)
+	if err != nil || rev.Revoked || rev.Err != nil || rev.ManualKey != e.input().AccessKey {
+		t.Fatalf("an S3 unlink must name the key to delete: %+v %v", rev, err)
 	}
 	if len(e.sec) != 0 || e.m.S3Config().Bucket != "" || e.m.Status().State != StateUnlinked {
 		t.Fatalf("not forgotten: %+v", e.m.Status())
@@ -208,3 +209,19 @@ func TestS3ChoiceSurvivesRestartAndStartLinkRefused(t *testing.T) {
 type proFunc func() bool
 
 func (f proFunc) Pro() bool { return f() }
+
+// The API turns that into a warning that names the key, so the person can find it in
+// the storage service's console.
+func TestS3UnlinkWarnsAboutTheKeyThatStaysValid(t *testing.T) {
+	e := newS3Env(t, true)
+	e.m.SaveS3(e.input())
+	res, err := API{M: e.m}.Unlink(context.Background(), S3)
+	if err != nil || res.Revoked || !strings.Contains(res.Warning, e.input().AccessKey) {
+		t.Fatalf("%+v %v", res, err)
+	}
+	// Nothing configured, nothing to warn about.
+	res, err = API{M: e.m}.Unlink(context.Background(), S3)
+	if err != nil || res.Warning != "" {
+		t.Fatalf("second unlink: %+v %v", res, err)
+	}
+}

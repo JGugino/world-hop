@@ -181,6 +181,32 @@ func (r *Runner) Restore(id, snapshotID string) error {
 	return r.engine.Restore(w, snapshotID)
 }
 
+// CloudVersions lists the versions the cloud holds for a world, newest first.
+func (r *Runner) CloudVersions(ctx context.Context, id string) ([]CloudVersion, error) {
+	if r.engine == nil {
+		return nil, ErrNoStore
+	}
+	if _, err := r.find(id); err != nil {
+		return nil, err
+	}
+	return r.engine.CloudVersions(ctx, id)
+}
+
+// RestoreCloudVersion puts an older cloud version on this computer as the world.
+func (r *Runner) RestoreCloudVersion(ctx context.Context, id, version string) error {
+	if r.engine == nil {
+		return ErrNoStore
+	}
+	w, err := r.find(id)
+	if err != nil {
+		return err
+	}
+	r.pass.Lock() // don't race a sync pass
+	defer r.pass.Unlock()
+	_, err = r.engine.RestoreCloud(ctx, w, version)
+	return err
+}
+
 // FindWorld looks a world up by id among the configured sources.
 func (r *Runner) FindWorld(id string) (worlds.World, error) { return r.find(id) }
 

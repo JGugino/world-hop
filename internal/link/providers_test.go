@@ -37,10 +37,10 @@ func TestAPIAdapter(t *testing.T) {
 	if p := a.List(ctx)[0]; p.Linked || p.Error == "" {
 		t.Fatalf("revoked: %+v", p)
 	}
-	if err := a.Unlink(ctx, GoogleDrive); err != nil {
-		t.Fatal(err)
+	if res, err := a.Unlink(ctx, GoogleDrive); err != nil || res.Warning != "" {
+		t.Fatalf("%+v %v", res, err)
 	}
-	if err := a.Unlink(ctx, "nope"); !errors.Is(err, api.ErrUnknownProvider) {
+	if _, err := a.Unlink(ctx, "nope"); !errors.Is(err, api.ErrUnknownProvider) {
 		t.Fatal(err)
 	}
 }

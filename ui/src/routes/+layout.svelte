@@ -20,7 +20,8 @@ alive while the page is open) and tells the server when the page closes.
 		{ href: '/sources', label: 'Saves' },
 		{ href: '/cloud', label: 'Cloud account' },
 		{ href: '/encryption', label: 'Encryption' },
-		{ href: '/license', label: 'License' }
+		{ href: '/license', label: 'License' },
+		{ href: '/settings', label: 'Settings' }
 	];
 
 	// ago turns a timestamp into "just now", "5 min ago"...

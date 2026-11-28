@@ -26,8 +26,12 @@ type env struct {
 	idp     *httptest.Server
 	drive   *storetest.FakeDrive
 	revoked bool
-	state   string
-	redir   string
+	// revokeCalls are the tokens sent to the provider's revoke endpoint;
+	// revokeDown makes that endpoint fail like an unreachable provider.
+	revokeCalls []string
+	revokeDown  bool
+	state       string
+	redir       string
 }
 
 func newEnv(t *testing.T, cfg Config) *env {
@@ -52,13 +56,21 @@ func newEnv(t *testing.T, cfg Config) *env {
 		// Expires immediately, so every store call goes through a refresh.
 		w.Write([]byte(`{"access_token":"tok","refresh_token":"r","expires_in":1}`))
 	})
+	mux.HandleFunc("/revoke", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		e.revokeCalls = append(e.revokeCalls, r.Form.Get("token"))
+		if e.revokeDown {
+			w.WriteHeader(400)
+			w.Write([]byte(`{"error":"server_error"}`))
+		}
+	})
 	e.idp = httptest.NewServer(mux)
 	t.Cleanup(e.idp.Close)
 
 	e.m = New(cfg, e.tokens, t.TempDir())
 	e.m.HTTP = e.idp.Client()
 	g := e.m.providers[GoogleDrive]
-	g.oauth.AuthURL, g.oauth.TokenURL = e.idp.URL+"/auth", e.idp.URL+"/token"
+	g.oauth.AuthURL, g.oauth.TokenURL, g.oauth.RevokeURL = e.idp.URL+"/auth", e.idp.URL+"/token", e.idp.URL+"/revoke"
 	g.newStore = func(a httpx.Auth, hc *http.Client) store.Store {
 		s := gdrive.New(a, e.drive.Client())
 		s.APIBase = e.drive.URL
@@ -133,8 +145,11 @@ func TestLinkAndSyncThroughGoogleDrive(t *testing.T) {
 				t.Fatalf("list: %v %v", l, err)
 			}
 
-			if err := e.m.Unlink(tc.id); err != nil {
-				t.Fatal(err)
+			if rev, err := e.m.Unlink(tc.id); err != nil || !rev.Revoked || rev.Err != nil {
+				t.Fatalf("unlink: %+v %v", rev, err)
+			}
+			if len(e.revokeCalls) != 1 || e.revokeCalls[0] != "r" {
+				t.Fatalf("the provider was not told to revoke the refresh token: %v", e.revokeCalls)
 			}
 			if st := e.m.Status(); st.State != StateUnlinked {
 				t.Fatalf("after unlink: %+v", st)
@@ -265,8 +280,38 @@ func TestOnChangeFiresOnLinkAndUnlink(t *testing.T) {
 	}
 	e.waitState(t, StateLinked)
 	wait("linking")
-	if err := e.m.Unlink(GoogleDrive); err != nil {
+	if _, err := e.m.Unlink(GoogleDrive); err != nil {
 		t.Fatal(err)
 	}
 	wait("unlinking")
+}
+
+// A provider that can't be reached must not keep the account linked: the
+// credentials are forgotten here and the result says revoking failed.
+func TestUnlinkStillForgetsWhenRevokeFails(t *testing.T) {
+	e := newEnv(t, both)
+	if _, err := e.m.StartLink(GoogleDrive); err != nil {
+		t.Fatal(err)
+	}
+	e.waitState(t, StateLinked)
+	e.revokeDown = true
+	rev, err := e.m.Unlink(GoogleDrive)
+	if err != nil || rev.Revoked || rev.Err == nil {
+		t.Fatalf("unlink: %+v %v", rev, err)
+	}
+	if _, err := e.tokens.Get(GoogleDrive); !errors.Is(err, oauth.ErrNoToken) {
+		t.Fatalf("token still stored: %v", err)
+	}
+	if st := e.m.Status(); st.State != StateUnlinked {
+		t.Fatalf("after unlink: %+v", st)
+	}
+}
+
+// Unlinking an account that was never linked asks the provider nothing.
+func TestUnlinkWithNothingLinkedDoesNotCallTheProvider(t *testing.T) {
+	e := newEnv(t, both)
+	rev, err := e.m.Unlink(GoogleDrive)
+	if err != nil || rev.Revoked || rev.Err != nil || len(e.revokeCalls) != 0 {
+		t.Fatalf("%+v %v %v", rev, err, e.revokeCalls)
+	}
 }

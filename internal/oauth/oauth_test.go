@@ -24,6 +24,9 @@ type fakeProvider struct {
 	challenge, redirect, state string
 	refreshes                  int
 	revoked                    bool
+	revokeCalls                []string // tokens the revoke endpoint was sent
+	revokeStatus               int      // reply code for /revoke (0: 200)
+	revokeBody                 string
 }
 
 func newFakeProvider(t *testing.T) *fakeProvider {
@@ -61,6 +64,14 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 			w.Write([]byte(`{"access_token":"a2","expires_in":3600}`)) // no new refresh token
 		}
 	})
+	mux.HandleFunc("/revoke", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		p.revokeCalls = append(p.revokeCalls, r.Form.Get("token"))
+		if p.revokeStatus != 0 {
+			w.WriteHeader(p.revokeStatus)
+			w.Write([]byte(p.revokeBody))
+		}
+	})
 	p.Server = httptest.NewServer(mux)
 	t.Cleanup(p.Close)
 	return p
@@ -68,7 +79,7 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 
 func (p *fakeProvider) cfg() Config {
 	return Config{
-		ClientID: "cid", AuthURL: p.URL + "/auth", TokenURL: p.URL + "/token",
+		ClientID: "cid", AuthURL: p.URL + "/auth", TokenURL: p.URL + "/token", RevokeURL: p.URL + "/revoke",
 		Scopes: []string{"s1", "s2"}, ExtraAuthParams: map[string]string{"token_access_type": "offline"},
 	}
 }
@@ -167,5 +178,53 @@ func TestTimeoutAndCancel(t *testing.T) {
 	// Listener is closed afterwards.
 	if _, err := http.Get(pend.redirect); err == nil {
 		t.Fatal("listener still open")
+	}
+}
+
+func TestRevokeSendsTheRefreshToken(t *testing.T) {
+	p := newFakeProvider(t)
+	st := &MemoryStore{}
+	st.Set("k", Token{AccessToken: "a1", RefreshToken: "r1"})
+	src := &Source{Config: p.cfg(), HTTP: p.Client(), Store: st, Key: "k"}
+	if err := src.Revoke(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.revokeCalls) != 1 || p.revokeCalls[0] != "r1" {
+		t.Fatalf("revoke calls = %v, want the refresh token", p.revokeCalls)
+	}
+	// Revoking does not touch the local copy: the caller deletes it.
+	if _, err := st.Get("k"); err != nil {
+		t.Fatalf("Revoke removed the stored token: %v", err)
+	}
+	// A grant with only an access token revokes that.
+	st.Set("only", Token{AccessToken: "a9"})
+	src.Key = "only"
+	if err := src.Revoke(context.Background()); err != nil || p.revokeCalls[1] != "a9" {
+		t.Fatalf("access-only: %v %v", err, p.revokeCalls)
+	}
+}
+
+func TestRevokeOutcomes(t *testing.T) {
+	p := newFakeProvider(t)
+	st := &MemoryStore{}
+	st.Set("k", Token{RefreshToken: "r1"})
+	src := &Source{Config: p.cfg(), HTTP: p.Client(), Store: st, Key: "k"}
+
+	p.revokeStatus, p.revokeBody = 400, `{"error":"invalid_token","error_description":"Token expired or revoked"}`
+	if err := src.Revoke(context.Background()); err != nil {
+		t.Fatalf("already-invalid must count as revoked: %v", err)
+	}
+	p.revokeStatus, p.revokeBody = 400, `{"error":"invalid_request"}`
+	if err := src.Revoke(context.Background()); err == nil {
+		t.Fatal("a refused request must be an error")
+	}
+	empty := &Source{Config: p.cfg(), HTTP: p.Client(), Store: &MemoryStore{}, Key: "none"}
+	if err := empty.Revoke(context.Background()); !errors.Is(err, ErrNoToken) {
+		t.Fatalf("nothing stored: %v", err)
+	}
+	cfg := p.cfg()
+	cfg.RevokeURL = ""
+	if err := (&Source{Config: cfg, HTTP: p.Client(), Store: st, Key: "k"}).Revoke(context.Background()); !errors.Is(err, ErrRevokeUnsupported) {
+		t.Fatalf("no endpoint: %v", err)
 	}
 }

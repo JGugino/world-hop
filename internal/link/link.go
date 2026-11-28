@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	stdsync "sync"
+	"time"
 
 	"github.com/JGugino/world-hopper/internal/httpx"
 	"github.com/JGugino/world-hopper/internal/license"
@@ -130,9 +131,10 @@ func New(cfg Config, tokens oauth.TokenStore, stateDir string) *Manager {
 				hint:       "WORLDHOP_GOOGLE_CLIENT_ID",
 				oauth: oauth.Config{
 					ClientID: cfg.GoogleClientID, ClientSecret: cfg.GoogleClientSecret,
-					AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
-					TokenURL: "https://oauth2.googleapis.com/token",
-					Scopes:   []string{gdrive.Scope},
+					AuthURL:   "https://accounts.google.com/o/oauth2/v2/auth",
+					TokenURL:  "https://oauth2.googleapis.com/token",
+					RevokeURL: "https://oauth2.googleapis.com/revoke",
+					Scopes:    []string{gdrive.Scope},
 					// offline + consent make Google return a refresh token.
 					ExtraAuthParams: map[string]string{"access_type": "offline", "prompt": "consent"},
 				},
@@ -328,11 +330,41 @@ func (m *Manager) CancelLink() {
 	}
 }
 
-// Unlink forgets the stored credentials for a provider. Cloud data is left
-// untouched. (Access can also be revoked in the provider's account settings.)
-func (m *Manager) Unlink(id string) error {
-	if m.providers[id] == nil {
-		return ErrUnknownProvider
+// Revocation says whether unlinking also ended WorldHop's access at the provider.
+type Revocation struct {
+	// Revoked: the provider confirmed the access was ended.
+	Revoked bool
+	// Err is why it was not, when there was an account to revoke and it could not be
+	// done (offline, provider unavailable). The credentials were still forgotten here.
+	Err error
+	// ManualKey is set when WorldHop cannot revoke the credential at all and the
+	// person has to: for S3 it is the access key id that was forgotten here, which
+	// stays valid with the storage service until it is deleted or rotated there.
+	// (Revoking a key is an account-management call that differs for every
+	// S3-compatible service, and a bucket key usually may not delete itself.)
+	ManualKey string
+}
+
+// revokeTimeout bounds the call to the provider, so unlinking while offline is
+// slow for a few seconds, not for minutes.
+const revokeTimeout = 10 * time.Second
+
+// Unlink forgets the stored credentials for a provider, and for an OAuth account
+// first asks the provider to revoke WorldHop's access, so it ends there too and a
+// copied token stops working. The local credentials are forgotten even if revoking
+// fails (being offline must not keep an account linked); the Revocation says what
+// happened so the person can be told to remove the access in the provider's account
+// settings. Cloud data is left untouched. S3 has no grant to revoke: its access
+// keys stay valid with the service until the person deletes them there, so the
+// Revocation names the key to delete.
+func (m *Manager) Unlink(id string) (Revocation, error) {
+	p := m.providers[id]
+	if p == nil {
+		return Revocation{}, ErrUnknownProvider
+	}
+	var rev Revocation
+	if id != S3 {
+		rev = m.revoke(id, p)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -341,16 +373,40 @@ func (m *Manager) Unlink(id string) error {
 		m.pending = nil
 	}
 	if id == S3 {
+		if c, err := m.loadS3Creds(); err == nil {
+			rev.ManualKey = c.AccessKey
+		}
 		if err := m.forgetS3(); err != nil {
-			return err
+			return rev, err
 		}
 	} else if err := m.tokens.Delete(id); err != nil {
-		return err
+		return rev, err
 	}
 	m.resetProvider(id)
 	m.lastErr = ""
 	m.changed()
-	return nil
+	return rev, nil
+}
+
+// revoke asks the provider to end the stored grant. It does not hold the manager's
+// lock while it talks to the network, so store calls are not blocked meanwhile.
+func (m *Manager) revoke(id string, p *provider) Revocation {
+	m.mu.Lock()
+	src := m.sources[id]
+	m.mu.Unlock()
+	if src == nil { // never used in this run: read the stored token directly
+		src = &oauth.Source{Config: p.oauth, HTTP: m.HTTP, Store: m.tokens, Key: id}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), revokeTimeout)
+	defer cancel()
+	switch err := src.Revoke(ctx); {
+	case err == nil:
+		return Revocation{Revoked: true}
+	case errors.Is(err, oauth.ErrNoToken): // nothing was linked
+		return Revocation{}
+	default:
+		return Revocation{Err: err}
+	}
 }
 
 // current returns the chosen provider's store, building it on first use. It is the
@@ -483,6 +539,34 @@ func (m *Manager) ListWorlds(ctx context.Context) ([]string, error) {
 	}
 	l, err := s.ListWorlds(ctx)
 	return l, m.wrap(id, err)
+}
+
+var _ store.Remover = (*Manager)(nil)
+
+// DeletePack removes a pack on the chosen provider, if it can delete.
+func (m *Manager) DeletePack(ctx context.Context, name string) error {
+	s, id, err := m.current()
+	if err != nil {
+		return err
+	}
+	rm, ok := s.(store.Remover)
+	if !ok {
+		return store.ErrUnsupported
+	}
+	return m.wrap(id, rm.DeletePack(ctx, name))
+}
+
+// DeleteManifest removes a manifest on the chosen provider, if it can delete.
+func (m *Manager) DeleteManifest(ctx context.Context, world, name string) error {
+	s, id, err := m.current()
+	if err != nil {
+		return err
+	}
+	rm, ok := s.(store.Remover)
+	if !ok {
+		return store.ErrUnsupported
+	}
+	return m.wrap(id, rm.DeleteManifest(ctx, world, name))
 }
 
 // NotConfiguredError means this build has no OAuth client ID for the provider.

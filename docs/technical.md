@@ -89,7 +89,9 @@ By default (`!webview` build tag) the UI opens in the default browser: `rundll32
 | `POST /api/pick-folder` | Native folder dialog |
 | `GET /api/worlds`, `POST /api/worlds/{id}/sync`, `/resolve` | World list, per-world sync, conflict resolution |
 | `POST /api/worlds/{id}/lost` | Choose what to do about data the cloud lost (`accept-cloud` or `reupload`) |
-| `GET /api/worlds/{id}/snapshots`, `POST /api/worlds/{id}/restore` | Snapshots and restore |
+| `GET /api/worlds/{id}/snapshots`, `POST /api/worlds/{id}/restore` | Local snapshots and restore |
+| `GET /api/worlds/{id}/versions`, `POST /api/worlds/{id}/restore-version` | Cloud versions and restoring one |
+| `GET`/`PUT /api/settings` | Snapshots kept in the cloud (2 to 50) |
 | `GET /api/cloud-worlds`, `POST /api/cloud-worlds/{id}/download` | Worlds that exist only in the cloud |
 | `GET /api/providers`, `POST /api/providers/{id}/link` and `/unlink` | Cloud accounts |
 | `GET/PUT /api/s3`, `POST /api/s3/test` | S3 settings (Pro) |
@@ -116,7 +118,7 @@ A **manifest** describes one immutable version of a world: world id, device id, 
 
 ### 3.3 The store contract
 
-`store.Store` needs only write-once blobs and listing. No locking, no overwrite, no delete:
+`store.Store` needs only write-once blobs and listing. No locking, no overwrite, and the engine never relies on delete:
 
 ```
 PutPack / GetPack            immutable, content-addressed
@@ -126,6 +128,8 @@ ListWorlds()                 ids of worlds with at least one manifest
 ```
 
 Google Drive and S3 use the same layout: `packs/<sha256>` and `worlds/<id>/<manifest>`.
+
+Deleting is the separate, optional `store.Remover` (`DeletePack`, `DeleteManifest`; deleting what is already gone is not an error), implemented by the local folder, Drive, S3, the encryption layers and `link.Manager`. Only cloud cleanup (3.11) and the plaintext removal (section 5) use it, and only ever with names they read from a manifest.
 
 ### 3.4 Versions, heads and conflicts
 
@@ -155,7 +159,9 @@ Each device remembers, per world, the manifest it last synced with and its tree 
 
 ### 3.6 Snapshots and restore
 
-Before any pull, conflict resolution or restore replaces a world, the old version is kept as a local snapshot under `snapshots/<world id>/<UTC timestamp>-<reason>`. On the same volume the old folder is simply renamed (no copy); otherwise it is copied first. The newest 5 are kept (`SnapshotsKeep`). **Restore** swaps a snapshot back in after snapshotting the current world (so a restore can be undone); the next push uploads the restored world as a new version. Snapshots are local only.
+Before any pull, conflict resolution or restore replaces a world, the old version is kept as a local snapshot under `snapshots/<world id>/<UTC timestamp>-<reason>`. On the same volume the old folder is simply renamed (no copy); otherwise it is copied first. The newest 5 are kept (`SnapshotsKeep`). **Restore** swaps a snapshot back in after snapshotting the current world (so a restore can be undone); the next push uploads the restored world as a new version. These snapshots are local only; the cloud's own history of versions is browsable and restorable too (below).
+
+**Cloud versions.** Every push is kept in the cloud as a version until cleanup (3.11) removes it, so the cloud holds the newest N versions of each world, where N is the "snapshots kept in the cloud" setting (default 5, minimum 2, maximum 50, stored in `config.json`). `Engine.CloudVersions` lists them and `Engine.RestoreCloud` puts an older one on this computer: the current world is first kept as a local snapshot (`cloud-restore`), the version is built like a pull, and "last synced" is recorded as the current head, so the restored world shows as a local change and the next push uploads it as a new version on top (nothing in the cloud is rewritten). It refuses during a conflict, for the current version, and for a version cleanup already removed.
 
 ### 3.7 When syncing happens
 
@@ -190,6 +196,20 @@ The key header is covered the same way (section 5): this computer saves the newe
 
 Limits: a computer that never saw a version cannot miss it, so a brand-new computer, or one whose state folder was deleted, detects nothing, and a rollback to a state no computer saw is invisible. Any computer that has seen the lost version notices. Packs are checked when something is pushed or pulled, not on every pass, so a world that is up to date on every computer may not notice lost packs until it next changes. The same warning appears when a different cloud account is connected or WorldHop's data was cleared in the cloud on purpose; the person's choice settles it.
 
+### 3.11 Cloud cleanup
+
+Every push adds a manifest and the packs it needed, so without cleanup the cloud only grows. `Engine.Cleanup` (`internal/sync/cleanup.go`) removes old versions and the packs only they used.
+
+**What is kept per world:** every head (so an unresolved conflict is never touched), the newest N versions (the "snapshots kept in the cloud" setting, `cloudSnapshots` in `/api/settings`: default 5, minimum 2, maximum 50), and everything younger than `KeepFor` (14 days). Everything else is removed. The age rule is what lets a computer that was off for a while still find the version it last synced.
+
+**What is deleted:** a pack goes only if no version that stays, in any world, points at it (identical worlds share packs). Packs are deleted first, then manifests, so an interrupted run leaves old manifests that the next run removes. It deletes only by names found in manifests, so it never reaches another layout's data (the plaintext copy beside an encrypted one, an older key's copy). The consequence is that packs no manifest ever pointed at (left by an interrupted push) are not found and stay. The whole run stops, deleting nothing, if any manifest cannot be read or listed, and skips worlds the cloud lost versions of.
+
+**Other computers:** a removed version must not look like lost data (3.10). `withoutPruned` (`lost.go`) treats a missing version as pruned when a version this computer saved already names it as a parent, or when a listed version still names a parent that is gone and the missing one is not newer than that parent. A missing newest version, an emptied world, or a wiped cloud that was uploaded to again is still reported. A computer that was offline long enough for its own newest-seen version to be pruned before it saw any successor is told the cloud lost that version; choosing "use the cloud as it is now" settles it.
+
+**Concurrent pushes:** a push builds only on the heads it saw, which cleanup never removes, and checks every pack its manifest will name once more right before writing it (`errPackVanished`), which covers a pack it found already stored while cleanup was deciding to delete it.
+
+**When it runs:** the `Runner` runs it after a full pass with outcome `ok`, at most once per 24 hours per layout (`CleanupDue`, a stamp file under the state dir), and logs the result. A store that cannot delete (`ErrUnsupported`) is skipped. The number of versions kept is a setting (Settings tab, `GET`/`PUT /api/settings`); cleanup itself cannot be turned off.
+
 ## 4. Cloud providers
 
 `link.Manager` implements `store.Store` by delegating to the chosen provider, so the engine is built once and follows the user's choice. The choice is saved in `provider.json`. With no provider chosen, store calls return `ErrNotLinked` and the UI says there is no cloud account.
@@ -199,6 +219,8 @@ Limits: a computer that never saw a version cannot miss it, so a brand-new compu
 Uses only the `drive.appdata` scope, so WorldHop sees its own hidden app folder and nothing else in the user's Drive. Drive has no real paths, so objects are flat files named `packs/<hash>` and `worlds/<id>/<manifest>`, with world ids and kinds stored in `appProperties` for listing. Uploads over 5 MiB use the resumable protocol.
 
 Sign-in is the installed-app OAuth flow with PKCE on a loopback port: the app opens one browser consent page, receives the redirect on `127.0.0.1`, and exchanges the code. Tokens are stored in the OS keychain (Keychain, Credential Manager, Secret Service), never in plain files. The browser tab it lands on is a styled page served by the same loopback listener (embedded in `internal/oauth/page`, same look as the web view). It first shows "Finishing sign-in", then polls `/callback/result` and switches to the real outcome once the code is exchanged **and** the credentials are saved (`Pending.Saved`). Outcomes with their own wording: connected, declined, a permission left unticked, provider unavailable, blocked by an administrator, build set up wrongly, other provider error, incomplete redirect, stale link, expired code, network failure, timeout, refused token request, keychain failure and cancelled from inside WorldHop. The page also says so if it loses contact with the app. The listener stays up for up to 30 seconds after the outcome so the page can read it. A revoked or expired grant moves the account to `needs-reconnect`.
+
+**Unlinking** (`POST /api/providers/{id}/unlink`, `link.Manager.Unlink`) first asks Google to revoke the grant (`oauth.Source.Revoke`, a POST of the refresh token to `RevokeURL`, `https://oauth2.googleapis.com/revoke`; revoking the refresh token also ends the access tokens made from it), then deletes the stored tokens. The revoke call has a 10 second timeout and runs without the manager lock. Local deletion happens whether or not the call worked, so being offline never keeps an account linked; the response is `{"revoked": bool, "warning"?: string}` and the warning, shown on the Cloud page, says to remove WorldHop at myaccount.google.com/permissions. A provider answering `invalid_token` (already revoked or expired) counts as revoked. S3 has no grant to revoke (ending a key is an account-management call that differs per S3-compatible service, and a bucket key usually may not delete itself), so unlinking S3 forgets the keys here and returns a warning that names the access key id to delete or rotate in the storage service's console.
 
 OAuth client IDs are compiled into release builds (`DefaultGoogleClientID`, `DefaultGoogleClientSecret`, set by `-ldflags`). For development, `cloud.json` in the state dir (keys `googleClientId`, `googleClientSecret`) and the environment variables `WORLDHOP_GOOGLE_CLIENT_ID` and `WORLDHOP_GOOGLE_CLIENT_SECRET` override them, environment last. Google lists desktop client secrets as not truly confidential, but they are still never committed.
 
@@ -226,13 +248,13 @@ Not implemented. An earlier build had a Dropbox store; the product decision is G
 
 **Changing the passphrase:** every key comes from the passphrase and a salt, so a new passphrase means a new key and, because names are derived from the key, a new layout beside the old one. `Manager.StartChangePassphrase` (`internal/crypt/rekey.go`) verifies the current passphrase, then re-encrypts in the background: every world's manifests, and the packs of each world's newest versions, are read through the old key and written through the new one (packs first, then manifests), looping until a pass finds nothing new so versions another computer pushes meanwhile are carried over. **Writing the next key header generation is the commit point** (`manifest-<generation>-key.json`; the newest generation is the key in force, and older headers are left as they were). Until then no other computer sees any of it, so a cancelled, failed or interrupted change leaves only unused data. An unfinished attempt is remembered in `rekey.json` (the salt and the generation it replaces, no secret) so a retry with the same new passphrase reuses the salt and finds the data already copied. Manifest names are the same in both layouts, so each computer's "last synced" record stays valid and nothing looks like a conflict. Each key generation has its own index of worlds (`_worldhop-index`, then `_worldhop-index-g2`, ...), because entries sealed with one key cannot be opened with another. While a change runs, store calls from this computer return `ErrRekeying` (shown as an informational "being changed" problem), and Lock, Disable and a second change are refused. The change is not a Pro feature, and works from a locked state, since it only maintains data that is already encrypted.
 
-Other computers find out by comparing the newest key header's generation with the one they unlocked: an unlocked computer checks at most once a minute, and a locked or restarted one compares the header with the `keyId` saved in `encryption.json`. Either way it drops its key (also from the keychain) and reports `ErrPassphraseChanged`, and the Encryption tab asks for the new passphrase. The previous encrypted copy cannot be removed by WorldHop (the store has no delete); it stays readable with the old passphrase until the user deletes it with the provider. Packs of versions older than each world's newest are not carried over, so that history exists only in the old copy.
+Other computers find out by comparing the newest key header's generation with the one they unlocked: an unlocked computer checks at most once a minute, and a locked or restarted one compares the header with the `keyId` saved in `encryption.json`. Either way it drops its key (also from the keychain) and reports `ErrPassphraseChanged`, and the Encryption tab asks for the new passphrase. The previous encrypted copy is not removed (cleanup only touches the layout in use); it stays readable with the old passphrase until the user deletes it with the provider. Packs of versions older than each world's newest are not carried over, so that history exists only in the old copy.
 
 **Key header rollback:** the newest key header this computer used (generation and the header itself, which holds no secret) is saved in `encryption.json`. If the cloud later shows an older header, or none, `ErrKeyRollback` stops syncing, and the Encryption tab offers `restore-key` (write the saved copy back; it fails if the provider is only hiding the header) or `accept-key-rollback` (forget the newer key and go by what the cloud shows; with no header at all, encryption is turned off here so a new key can be made). Unlocking with an older header is refused until then. Settings saved by an earlier version have nothing to compare, so they are never flagged.
 
 **Second computer:** enable encryption and enter the same passphrase. The key header is found in the account, the passphrase is verified, and worlds appear. Creating a new key needs the passphrase twice and an explicit acknowledgement that a lost passphrase cannot be recovered.
 
-**Existing plaintext data:** the store is write-once with no delete, so the app cannot remove the old copy. Enabling encryption starts a separate encrypted layout beside it and each world is re-uploaded encrypted on its next sync. The user must delete the old plaintext copy in the provider's own settings. "Last synced" records, the manifest cache and the stat cache are kept per layout (`Engine.StateScope`, value `enc`) so toggling never causes a false conflict.
+**Existing plaintext data:** enabling encryption starts a separate encrypted layout beside the plaintext one and each world is re-uploaded encrypted on its next sync. `Manager.RemovePlaintext` (`internal/crypt/plaintext.go`) then deletes the plaintext copy (packs, then manifests) of every world the encrypted layout already holds in its newest form: one of its versions has the same files as a plaintext head, or its newest version was written after every plaintext head. The `Runner` calls it after a good full pass, at most hourly, and only while encryption is on and unlocked. A world with no encrypted copy yet (cloud-only, or on no computer that has synced since) keeps its plaintext copy until one does; packs shared with such a world are kept. Another computer that has not turned encryption on keeps uploading plaintext and, once that copy is gone, reports the cloud as having lost what it saw; enabling encryption there is the way forward. Turning encryption off again afterwards finds no plaintext copy, so each world is reported as lost and "upload this computer's copy" restores it. "Last synced" records, the manifest cache and the stat cache are kept per layout (`Engine.StateScope`, value `enc`) so toggling never causes a false conflict.
 
 **Remembering the passphrase:** off by default. If the user opts in, the derived key (not the passphrase) goes in the OS keychain. `encryption.json` records only `enabled` and `remember`. While locked, syncing stops with "encryption is on but locked"; it never falls back to uploading unencrypted.
 

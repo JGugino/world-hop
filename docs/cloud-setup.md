@@ -63,7 +63,9 @@ which wins over the compiled-in defaults.
 
 Drive (appDataFolder, flat names plus `appProperties`) holds
 `packs/<sha256>` and `worlds/<id>/manifest-<gen>-<device>.json`. Packs upload first, the manifest
-last. Manifests are write-once: Drive checks for the name first.
+last. Manifests are write-once: Drive checks for the name first. Once a day, after a good sync,
+WorldHop deletes old versions of each world (it keeps the newest 5 by default and everything from the
+last 14 days) and the packs only they used, so storage use stops growing with every save.
 
 Dropbox support was removed to keep a single provider to support. The `store.Store` interface and the
 `link` provider table are still generic, so another provider can be added later.

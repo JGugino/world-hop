@@ -55,3 +55,29 @@ func TestConfigRoundTrip(t *testing.T) {
 		t.Fatalf("after remove: %v", s)
 	}
 }
+
+func TestCloudSnapshotsSetting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	c, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.CloudSnapshots(); got != DefaultCloudSnapshots || DefaultCloudSnapshots != 5 {
+		t.Fatalf("default = %d, want 5", got)
+	}
+	for _, bad := range []int{0, 1, MaxCloudSnapshots + 1} {
+		if err := c.SetCloudSnapshots(bad); err != ErrCloudSnapshots {
+			t.Fatalf("SetCloudSnapshots(%d) = %v", bad, err)
+		}
+	}
+	if err := c.SetCloudSnapshots(2); err != nil || c.CloudSnapshots() != 2 {
+		t.Fatalf("minimum refused: %v", err)
+	}
+	if err := c.SetCloudSnapshots(7); err != nil {
+		t.Fatal(err)
+	}
+	c2, _, err := Load(path)
+	if err != nil || c2.CloudSnapshots() != 7 {
+		t.Fatalf("not saved: %v %d", err, c2.CloudSnapshots())
+	}
+}
