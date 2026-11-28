@@ -368,10 +368,12 @@ export const getProviders = () => call<Provider[]>('GET', '/api/providers');
 export const linkProvider = (id: ProviderId) =>
 	call<{ url?: string }>('POST', `/api/providers/${id}/link`);
 /**
- * Forgets the stored sign-in or keys. Cloud data is left alone.
+ * Forgets the stored sign-in or keys, and asks the provider to end WorldHop's access
+ * where it can. `warning` is set when that could not be done (offline): the sign-in
+ * is forgotten here either way. Cloud data is left alone.
  */
 export const unlinkProvider = (id: ProviderId) =>
-	call<void>('POST', `/api/providers/${id}/unlink`);
+	call<{ revoked: boolean; warning?: string }>('POST', `/api/providers/${id}/unlink`);
 
 /**
  * The saved S3 settings.

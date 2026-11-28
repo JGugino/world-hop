@@ -96,13 +96,27 @@ func (a API) Save(in api.S3Input) error { return a.M.SaveS3(s3Input(in)) }
 // Test checks the entered S3 settings against the bucket without saving anything.
 func (a API) Test(ctx context.Context, in api.S3Input) error { return a.M.TestS3(ctx, s3Input(in)) }
 
-// Unlink forgets a provider's stored credentials (cloud data is left alone).
-func (a API) Unlink(_ context.Context, id string) error {
-	err := a.M.Unlink(id)
+// Unlink forgets a provider's stored credentials and asks the provider to end
+// WorldHop's access (cloud data is left alone). If the provider could not be
+// reached the result carries a warning saying where to remove the access by hand.
+func (a API) Unlink(_ context.Context, id string) (api.UnlinkResult, error) {
+	rev, err := a.M.Unlink(id)
 	if errors.Is(err, ErrUnknownProvider) {
-		return api.ErrUnknownProvider
+		return api.UnlinkResult{}, api.ErrUnknownProvider
 	}
-	return err
+	if err != nil {
+		return api.UnlinkResult{}, err
+	}
+	res := api.UnlinkResult{Revoked: rev.Revoked}
+	if rev.ManualKey != "" {
+		res.Warning = "Disconnected on this computer, but WorldHop can't revoke S3 access keys: access key " +
+			rev.ManualKey + " stays valid with your storage service. Delete or rotate it in the service's console (under access keys or API tokens) if you no longer want it to work."
+	}
+	if rev.Err != nil {
+		res.Warning = "Disconnected on this computer, but " + a.M.providers[id].name +
+			" could not be reached to end WorldHop's access. Remove WorldHop under your account's third-party access settings (for Google: myaccount.google.com/permissions)."
+	}
+	return res, nil
 }
 
 // unavailable wraps an error so it matches api.ErrProviderUnavailable, which the API

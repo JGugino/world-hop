@@ -42,7 +42,10 @@ type Config struct {
 	ClientSecret string // optional; Google's installed-app secret is not confidential
 	AuthURL      string
 	TokenURL     string
-	Scopes       []string
+	// RevokeURL is the provider's token revocation endpoint (RFC 7009). Empty means
+	// the provider has none, and Source.Revoke reports ErrRevokeUnsupported.
+	RevokeURL string
+	Scopes    []string
 	// ExtraAuthParams are added to the authorization URL (offline access etc).
 	ExtraAuthParams map[string]string
 	// RedirectPort fixes the loopback port; 0 picks a free one. Use it for
@@ -340,6 +343,59 @@ func (s *Source) Token(ctx context.Context) (string, error) {
 	}
 	s.tok = &t
 	return t.AccessToken, nil
+}
+
+// ErrRevokeUnsupported: the provider has no revocation endpoint configured.
+var ErrRevokeUnsupported = errors.New("oauth: provider has no revocation endpoint")
+
+// Revoke tells the provider to invalidate this account's grant, so WorldHop's
+// access ends there and not only on this computer. It sends the refresh token
+// (revoking it also ends the access tokens made from it); an account that has only
+// an access token sends that. Nothing stored is ErrNoToken. A provider that says
+// the token is already invalid has done what was asked, so that is success. It does
+// not delete anything locally: the caller does that whether or not this worked.
+func (s *Source) Revoke(ctx context.Context) error {
+	if s.Config.RevokeURL == "" {
+		return ErrRevokeUnsupported
+	}
+	t, err := s.Store.Get(s.Key)
+	if err != nil {
+		return err
+	}
+	tok := t.RefreshToken
+	if tok == "" {
+		tok = t.AccessToken
+	}
+	if tok == "" {
+		return ErrNoToken
+	}
+	form := url.Values{"token": {tok}}
+	if s.Config.ClientID != "" {
+		form.Set("client_id", s.Config.ClientID)
+	}
+	body := form.Encode()
+	resp, err := httpx.Do(ctx, s.HTTP, func() (*http.Request, error) {
+		req, err := http.NewRequest("POST", s.Config.RevokeURL, strings.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return req, nil
+	})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	raw := httpx.ReadErrBody(resp)
+	var tr tokenResp
+	_ = json.Unmarshal([]byte(raw), &tr)
+	if tr.Error == "invalid_token" { // already revoked or expired: nothing left to end
+		return nil
+	}
+	return fmt.Errorf("oauth: revoke endpoint %d: %s %s", resp.StatusCode, tr.Error, tr.ErrorDesc)
 }
 
 // Invalidate marks the cached access token stale so the next Token refreshes.

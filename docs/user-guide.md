@@ -65,7 +65,7 @@ That is all. WorldHop asks only for access to its own private app folder in your
 
 ![Cloud account tab](c-cloud.png)
 
-To disconnect, click **Disconnect** on the same tab. If Google access is ever revoked, WorldHop asks you to reconnect.
+To disconnect, click **Disconnect** on the same tab. WorldHop also asks Google to end its access, so it disappears from your Google account's permissions. If you are offline at that moment, WorldHop still disconnects on this computer and tells you to remove it at myaccount.google.com/permissions. If Google access is ever revoked, WorldHop asks you to reconnect.
 
 ## 6. How syncing works
 
@@ -172,6 +172,8 @@ On the free version, the first world to sync is the free world. You can change i
 3. Click **Test connection**, then **Save**.
 
 Works with AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO and other S3-compatible services. The key needs list, read and write permission on the bucket. Your secret key is stored in the system keychain, not in a file.
+
+When you disconnect S3, WorldHop forgets the key on this computer, but it cannot cancel the key with your storage service: it stays valid until you delete or rotate it in the service's console. WorldHop shows the access key's id so you can find it.
 
 ### Encryption
 
