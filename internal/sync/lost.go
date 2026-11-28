@@ -131,8 +131,11 @@ func missingFrom(seen, listed []string) []string {
 }
 
 // lostVersions compares the listing with what has been seen.
-func (e *Engine) lostVersions(id string, listed []string) *LostError {
+func (e *Engine) lostVersions(ctx context.Context, id string, listed []string) *LostError {
 	miss := missingFrom(e.seenNames(id), listed)
+	if len(miss) > 0 {
+		miss = e.withoutPruned(ctx, id, miss, listed)
+	}
 	if len(miss) == 0 {
 		return nil
 	}
@@ -141,6 +144,66 @@ func (e *Engine) lostVersions(id string, listed []string) *LostError {
 		kind = LostWorld
 	}
 	return &LostError{WorldID: id, Kind: kind, Versions: miss, Remaining: len(listed)}
+}
+
+// withoutPruned removes from miss the versions that cloud cleanup (cleanup.go) may
+// have deleted on purpose, and forgets their saved copies, so ordinary pruning of old
+// history is never mistaken for lost data. Cleanup only deletes versions that newer
+// ones supersede, so a missing version counts as pruned when
+//
+//   - a version this computer saved names it as a parent (it was already
+//     superseded when this computer last saw it), or
+//   - a listed version still names a parent that is no longer listed, and this one
+//     is not newer than that parent: the history under the oldest remaining versions
+//     was cut off, which is what pruning leaves behind. A rollback removes the newest
+//     versions and leaves no such gap, and neither does a wiped cloud that someone
+//     then uploaded to again (the new version has no parents, or listed ones).
+//
+// What stays flagged is what matters: the newest version this computer saw (nothing
+// supersedes it here) is missing, or the world has nothing listed at all.
+func (e *Engine) withoutPruned(ctx context.Context, id string, miss, listed []string) []string {
+	if len(listed) == 0 {
+		return miss
+	}
+	superseded := map[string]bool{}
+	for _, n := range e.seenNames(id) {
+		if m := e.cachedManifest(id, n); m != nil {
+			for _, p := range m.Parents {
+				superseded[p] = true
+			}
+		}
+	}
+	// The newest generation among parents that are no longer listed. Needs the
+	// listed versions' contents; they are fetched anyway by the pass that follows.
+	cutBelow := int64(-1)
+	if ms, err := e.loadListed(ctx, id, listed); err == nil {
+		have := map[string]bool{}
+		for _, n := range listed {
+			have[n] = true
+		}
+		for _, m := range ms {
+			for _, p := range m.Parents {
+				if g, _, ok := manifest.ParseName(p); ok && !have[p] && g > cutBelow {
+					cutBelow = g
+				}
+			}
+		}
+	}
+	var lost, pruned []string
+	for _, n := range miss {
+		g, _, ok := manifest.ParseName(n)
+		if superseded[n] || (ok && g <= cutBelow) {
+			pruned = append(pruned, n)
+		} else {
+			lost = append(lost, n)
+		}
+	}
+	if len(lost) == 0 { // forget only when nothing else is wrong, so the report stays complete
+		for _, n := range pruned {
+			os.Remove(e.manifestCachePath(id, n))
+		}
+	}
+	return lost
 }
 
 // forgetMissing drops the saved copies of manifests the cloud no longer lists,
@@ -256,7 +319,7 @@ func (e *Engine) LostDetails(ctx context.Context, id string) (*LostError, error)
 	if err != nil {
 		return nil, err
 	}
-	if le := e.lostVersions(id, listed); le != nil {
+	if le := e.lostVersions(ctx, id, listed); le != nil {
 		return le, nil
 	}
 	return e.lost.get(id), nil

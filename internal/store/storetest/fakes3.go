@@ -208,6 +208,9 @@ func (f *FakeS3) serve(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			w.Write(b)
 		}
+	case r.Method == "DELETE":
+		delete(f.objects, key) // like S3: 204 whether or not it existed
+		w.WriteHeader(204)
 	default:
 		s3err(w, 405, "MethodNotAllowed", "no")
 	}

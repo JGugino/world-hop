@@ -43,6 +43,18 @@ type PackChecker interface {
 	MissingPacks(ctx context.Context, names []string) ([]string, error)
 }
 
+// Remover is implemented by stores that can delete what they hold. It is what
+// cloud cleanup uses: the sync engine only ever deletes by name, and only names it
+// found in a manifest, so it can never touch data belonging to another layout (the
+// encrypted copy beside a plaintext one, say). Deleting something that is already
+// gone is not an error, so an interrupted cleanup can simply run again.
+type Remover interface {
+	// DeletePack removes a pack. Missing is fine.
+	DeletePack(ctx context.Context, name string) error
+	// DeleteManifest removes one manifest of a world. Missing is fine.
+	DeleteManifest(ctx context.Context, worldID, name string) error
+}
+
 // Missing returns the names not in have, in the order given.
 func Missing(names []string, have map[string]bool) []string {
 	var out []string
@@ -63,9 +75,10 @@ func Missing(names []string, have map[string]bool) []string {
 //   - manifests describe one version of a world and are never overwritten (a second
 //     write of the same name is ErrExists), which is what makes two computers
 //     writing at once safe: they write different names and the engine notices;
-//   - there is no delete: WorldHop never removes data from the cloud (the one
-//     exception is the Drive backend clearing a junk file that shares a pack's name
-//     but is the wrong size, left by an interrupted upload).
+//   - nothing is ever overwritten, and the engine never relies on deleting: removing
+//     data is the optional Remover interface, used only by cloud cleanup for old
+//     versions and their packs (and by the Drive backend clearing a junk file that
+//     shares a pack's name but is the wrong size, left by an interrupted upload).
 //
 // The sync engine does not talk to a backend directly: it goes through crypt.Manager
 // (optional encryption) and link.Manager (which backend the user chose).
