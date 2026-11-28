@@ -53,7 +53,7 @@ Prism, MultiMC, CurseForge and Modrinth keep saves inside their own instance fol
 
 **Important:** computers match worlds by folder name. A world called `Survival Island` on one computer must have the same folder name on the other.
 
-To stop syncing a save, click **Remove** on the **Saves** tab, then **Stop syncing**. Your files and cloud copies are never deleted.
+To stop syncing a save, click **Remove** on the **Saves** tab, then **Stop syncing**. Your files and the newest cloud copy are kept. (WorldHop does remove old versions of worlds from your cloud storage over time, see section 8.)
 
 ## 5. Connect your cloud storage
 
@@ -171,7 +171,7 @@ On the free version, the first world to sync is the free world. You can change i
 2. Enter the bucket details and your access key. Leave **Endpoint** empty for AWS S3. For other services, enter their endpoint (for example `https://<account>.r2.cloudflarestorage.com`).
 3. Click **Test connection**, then **Save**.
 
-Works with AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO and other S3-compatible services. The key needs list, read and write permission on the bucket. Your secret key is stored in the system keychain, not in a file.
+Works with AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO and other S3-compatible services. The key needs list, read, write and delete permission on the bucket (delete is how WorldHop removes old versions; without it your storage still syncs, but old versions are not cleaned up). Your secret key is stored in the system keychain, not in a file.
 
 When you disconnect S3, WorldHop forgets the key on this computer, but it cannot cancel the key with your storage service: it stays valid until you delete or rotate it in the service's console. WorldHop shows the access key's id so you can find it.
 

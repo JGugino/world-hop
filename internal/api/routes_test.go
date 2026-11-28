@@ -359,6 +359,9 @@ func TestUnlinkReportsWhetherAccessWasRevoked(t *testing.T) {
 		if w.Code != 200 || !strings.Contains(w.Body.String(), tc.want) {
 			t.Fatalf("%d %s, want %s", w.Code, w.Body, tc.want)
 		}
+	}
+}
+
 func TestCloudSnapshotsSettingAPI(t *testing.T) {
 	dir := t.TempDir()
 	cfg, _, _ := config.Load(filepath.Join(dir, "cfg.json"))

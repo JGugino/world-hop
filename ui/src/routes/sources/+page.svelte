@@ -148,7 +148,7 @@ files.
 				</li>
 			{/each}
 		</ul>
-		<p class="muted small foot">Removing a save stops syncing it. Your files and cloud copies are not deleted.</p>
+		<p class="muted small foot">Removing a save stops syncing it. Your files and the newest cloud copy are kept.</p>
 	{/if}
 </section>
 
