@@ -89,7 +89,9 @@ By default (`!webview` build tag) the UI opens in the default browser: `rundll32
 | `POST /api/pick-folder` | Native folder dialog |
 | `GET /api/worlds`, `POST /api/worlds/{id}/sync`, `/resolve` | World list, per-world sync, conflict resolution |
 | `POST /api/worlds/{id}/lost` | Choose what to do about data the cloud lost (`accept-cloud` or `reupload`) |
-| `GET /api/worlds/{id}/snapshots`, `POST /api/worlds/{id}/restore` | Snapshots and restore |
+| `GET /api/worlds/{id}/snapshots`, `POST /api/worlds/{id}/restore` | Local snapshots and restore |
+| `GET /api/worlds/{id}/versions`, `POST /api/worlds/{id}/restore-version` | Cloud versions and restoring one |
+| `GET`/`PUT /api/settings` | Snapshots kept in the cloud (2 to 50) |
 | `GET /api/cloud-worlds`, `POST /api/cloud-worlds/{id}/download` | Worlds that exist only in the cloud |
 | `GET /api/providers`, `POST /api/providers/{id}/link` and `/unlink` | Cloud accounts |
 | `GET/PUT /api/s3`, `POST /api/s3/test` | S3 settings (Pro) |
@@ -157,7 +159,9 @@ Each device remembers, per world, the manifest it last synced with and its tree 
 
 ### 3.6 Snapshots and restore
 
-Before any pull, conflict resolution or restore replaces a world, the old version is kept as a local snapshot under `snapshots/<world id>/<UTC timestamp>-<reason>`. On the same volume the old folder is simply renamed (no copy); otherwise it is copied first. The newest 5 are kept (`SnapshotsKeep`). **Restore** swaps a snapshot back in after snapshotting the current world (so a restore can be undone); the next push uploads the restored world as a new version. Snapshots are local only.
+Before any pull, conflict resolution or restore replaces a world, the old version is kept as a local snapshot under `snapshots/<world id>/<UTC timestamp>-<reason>`. On the same volume the old folder is simply renamed (no copy); otherwise it is copied first. The newest 5 are kept (`SnapshotsKeep`). **Restore** swaps a snapshot back in after snapshotting the current world (so a restore can be undone); the next push uploads the restored world as a new version. These snapshots are local only; the cloud's own history of versions is browsable and restorable too (below).
+
+**Cloud versions.** Every push is kept in the cloud as a version until cleanup (3.11) removes it, so the cloud holds the newest N versions of each world, where N is the "snapshots kept in the cloud" setting (default 5, minimum 2, maximum 50, stored in `config.json`). `Engine.CloudVersions` lists them and `Engine.RestoreCloud` puts an older one on this computer: the current world is first kept as a local snapshot (`cloud-restore`), the version is built like a pull, and "last synced" is recorded as the current head, so the restored world shows as a local change and the next push uploads it as a new version on top (nothing in the cloud is rewritten). It refuses during a conflict, for the current version, and for a version cleanup already removed.
 
 ### 3.7 When syncing happens
 
@@ -204,7 +208,7 @@ Every push adds a manifest and the packs it needed, so without cleanup the cloud
 
 **Concurrent pushes:** a push builds only on the heads it saw, which cleanup never removes, and checks every pack its manifest will name once more right before writing it (`errPackVanished`), which covers a pack it found already stored while cleanup was deciding to delete it.
 
-**When it runs:** the `Runner` runs it after a full pass with outcome `ok`, at most once per 24 hours per layout (`CleanupDue`, a stamp file under the state dir), and logs the result. A store that cannot delete (`ErrUnsupported`) is skipped. There is no setting to turn it off.
+**When it runs:** the `Runner` runs it after a full pass with outcome `ok`, at most once per 24 hours per layout (`CleanupDue`, a stamp file under the state dir), and logs the result. A store that cannot delete (`ErrUnsupported`) is skipped. The number of versions kept is a setting (Settings tab, `GET`/`PUT /api/settings`); cleanup itself cannot be turned off.
 
 ## 4. Cloud providers
 
@@ -355,7 +359,7 @@ From the code and docs:
 - A passphrase change copies the data to a new layout; the old encrypted copy stays in the cloud (it is not cleaned up) and older versions' packs are not carried over. Another computer that syncs while a change runs can push into the old layout after the last catch-up pass; that version stays in the old copy, and that computer sees a local change to upload (or a conflict to resolve) after it unlocks.
 - Deletion and rollback are detected only by a computer that had seen what is missing, and lost packs only when something is pushed or pulled (see 3.10). Encryption detects modification of what is stored; a provider can still delete data, and the app can warn but cannot prevent or undo it.
 - Cloud cleanup (3.11) keeps the newest 5 versions and 14 days of history, finds packs only through manifests (packs left by an interrupted push are not removed), has no setting to turn it off (only how many versions to keep), and shows no result in the UI (it is logged). Only the plaintext copy of worlds that already have an encrypted copy is removed.
-- Snapshots are local only (newest 5 per world).
+- Local snapshots stay on the computer that took them (newest 5 per world). Only the cloud's version history is shared, and a snapshot of unsynced local changes that a pull or conflict resolution overwrote is not uploaded.
 - No code signing (Windows SmartScreen warning) and no macOS notarization. No MSI or AppImage.
 - No macOS release has been produced from this repository's tooling yet; it must be built on a Mac.
 - Unlinking removes the stored tokens locally; the code does not revoke them with the provider.
