@@ -28,6 +28,9 @@ func TestRunnerForceSync(t *testing.T) {
 	if st.State != "idle" || st.LastSync == nil || !strings.Contains(st.LastResult, "1 uploaded") {
 		t.Fatalf("first sync: %+v", st)
 	}
+	if e.CleanupDue() {
+		t.Fatal("a good full pass should have run cloud cleanup and noted it")
+	}
 	st = r.ForceSync(context.Background())
 	if !strings.Contains(st.LastResult, "1 up to date") {
 		t.Fatalf("second sync: %+v", st)

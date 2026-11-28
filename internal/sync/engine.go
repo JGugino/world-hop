@@ -61,6 +61,10 @@ var (
 	ErrWorldOpen = errors.New("world is open on this computer")
 	// ErrBehind: the store has a newer version and local has no changes.
 	ErrBehind = errors.New("a newer version exists in the store; pull first")
+	// errPackVanished: a pack this push relies on disappeared before its manifest
+	// could be written (cleanup on another computer, or the provider). Nothing was
+	// written; the next pass uploads it again.
+	errPackVanished = errors.New("a stored pack disappeared while uploading; it will be uploaded again on the next sync")
 	// ErrIntegrity: downloaded data did not match its hash.
 	ErrIntegrity = errors.New("integrity check failed")
 )
@@ -93,7 +97,11 @@ type Engine struct {
 	Store         store.Store
 	StateDir      string // per-device state and snapshots
 	DeviceID      string // filled by New
-	SnapshotsKeep int    // snapshots kept per world (default 5)
+	SnapshotsKeep int    // local snapshots kept per world (default 5)
+	// CloudKeep, if set, says how many of each world's newest versions cloud
+	// cleanup keeps (the "snapshots kept in the cloud" setting). Read at each
+	// cleanup, so a change applies at once.
+	CloudKeep func() int
 	// IsOpen reports whether the world is in use by the game. Optional.
 	IsOpen func(worldPath string) bool
 	// Authorize, if set, decides whether a world may be synced (the license
@@ -226,7 +234,7 @@ func (e *Engine) headsOpt(ctx context.Context, id string, ignoreLost bool) ([]he
 		return nil, err
 	}
 	if !ignoreLost {
-		if le := e.lostVersions(id, names); le != nil {
+		if le := e.lostVersions(ctx, id, names); le != nil {
 			// A listing can lag behind an upload (Google Drive's can, by seconds),
 			// and this computer's own newest version is in its cache at once. Look
 			// again before calling something lost.
@@ -241,31 +249,13 @@ func (e *Engine) headsOpt(ctx context.Context, id string, ignoreLost bool) ([]he
 			if err != nil {
 				return nil, err
 			}
-			if le = e.lostVersions(id, again); le != nil {
+			if le = e.lostVersions(ctx, id, again); le != nil {
 				return nil, le
 			}
 			names = again
 		}
 	}
-	loaded := make([]*manifest.Manifest, len(names))
-	var missing []int
-	for i, n := range names {
-		if m := e.cachedManifest(id, n); m != nil {
-			loaded[i] = m
-		} else {
-			missing = append(missing, i)
-		}
-	}
-	err = parallel(ctx, len(missing), transferWorkers, func(ctx context.Context, k int) error {
-		i := missing[k]
-		m, err := e.loadManifest(ctx, id, names[i])
-		if err != nil {
-			return err
-		}
-		loaded[i] = m
-		e.cacheManifest(id, names[i], m)
-		return nil
-	})
+	loaded, err := e.loadListed(ctx, id, names)
 	if err != nil {
 		return nil, err
 	}
@@ -295,6 +285,35 @@ func (e *Engine) headsOpt(ctx context.Context, id string, ignoreLost bool) ([]he
 		return hs[i].Name > hs[j].Name
 	})
 	return hs, nil
+}
+
+// loadListed returns the manifests for names (a listing), in the same order: saved
+// copies are used as they are and only the others are downloaded (concurrently) and
+// saved. Shared by heads and cloud cleanup.
+func (e *Engine) loadListed(ctx context.Context, id string, names []string) ([]*manifest.Manifest, error) {
+	loaded := make([]*manifest.Manifest, len(names))
+	var missing []int
+	for i, n := range names {
+		if m := e.cachedManifest(id, n); m != nil {
+			loaded[i] = m
+		} else {
+			missing = append(missing, i)
+		}
+	}
+	err := parallel(ctx, len(missing), transferWorkers, func(ctx context.Context, k int) error {
+		i := missing[k]
+		m, err := e.loadManifest(ctx, id, names[i])
+		if err != nil {
+			return err
+		}
+		loaded[i] = m
+		e.cacheManifest(id, names[i], m)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return loaded, nil
 }
 
 // scoped returns a state sub-directory (such as "manifests" or "cache") for the
@@ -755,6 +774,14 @@ func (e *Engine) uploadWith(ctx context.Context, w worlds.World, hs []head, sc *
 	if err := up.wait(); err != nil {
 		return PushResult{}, err
 	}
+	// Cloud cleanup may delete packs nothing lists any more, and a pack this push
+	// found already stored (identical content to an old one) is such a pack. Look
+	// once more, right before the manifest, so it never points at missing data.
+	if gone, err := e.missingPacks(ctx, chunks); err != nil {
+		return PushResult{}, err
+	} else if len(gone) > 0 {
+		return PushResult{}, errPackVanished
+	}
 	m := &manifest.Manifest{
 		Version: manifest.Version, WorldID: w.ID, DeviceID: e.DeviceID,
 		Generation: gen + 1, Parents: parents, CreatedAt: e.now(),
@@ -828,6 +855,14 @@ func (e *Engine) Pull(ctx context.Context, w worlds.World) (PullResult, error) {
 // leaves the world untouched; it never fills the gap from whatever is on this
 // computer.
 func (e *Engine) apply(ctx context.Context, w worlds.World, h head, reason string) (PullResult, error) {
+	return e.applyAs(ctx, w, h, reason, h)
+}
+
+// applyAs is apply with the version to record as "last synced" given separately:
+// a pull records the version it built (record == h), while restoring an older
+// cloud version records the current head, so the restored world shows up as a
+// local change that the next push uploads as a new version.
+func (e *Engine) applyAs(ctx context.Context, w worlds.World, h head, reason string, record head) (PullResult, error) {
 	e.phase(w.ID, "downloading")
 	staging := stagingPath(w.Path)
 	if err := os.RemoveAll(staging); err != nil {
@@ -867,7 +902,7 @@ func (e *Engine) apply(ctx context.Context, w worlds.World, h head, reason strin
 	sc := e.statCache(w.ID)
 	sc.entries, sc.dirty = fresh, true
 	sc.save()
-	return res, e.saveState(w.ID, state{h.Name, h.M.TreeHash()})
+	return res, e.saveState(w.ID, state{record.Name, record.M.TreeHash()})
 }
 
 // ---- conflict resolution ----

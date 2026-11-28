@@ -36,11 +36,17 @@ maintainer and the cloud provider, can reset it.
 
 ## Existing unencrypted data
 
-The store interface is write-once and has no delete, so WorldHop cannot remove the old
-copy. Turning encryption on starts a separate encrypted layout beside it, and each world
-is uploaded again encrypted on its next sync. The old plaintext copy stays until the user
-deletes it in the provider's own settings (Google Drive: Settings -> Manage apps ->
-WorldHop -> Delete hidden app data). The "last synced" records are kept per layout
+Turning encryption on starts a separate encrypted layout beside the old one, and each
+world is uploaded again encrypted on its next sync. Once a world's encrypted copy is in
+place, WorldHop deletes that world's old unencrypted copy from the cloud by itself (after
+a sync, within the hour). A world that has no encrypted copy yet keeps its unencrypted
+copy until a computer that has it syncs; to remove everything at once, delete the hidden
+app data in the provider's own settings (Google Drive: Settings -> Manage apps ->
+WorldHop -> Delete hidden app data) and sync again. Computers that have not turned
+encryption on yet will report the cloud as having lost their worlds once the old copy is
+gone; turn it on there with the same passphrase. Turning encryption off later does not
+bring the unencrypted copy back: each world shows as lost until you choose "upload this
+computer's copy". The "last synced" records are kept per layout
 (`Engine.StateScope`), so turning encryption on or off never causes a phantom conflict or
 pulls older data over newer. Every computer that syncs a world must turn encryption on; a
 computer that has not yet will keep using the old layout.
@@ -95,8 +101,8 @@ encrypted worlds keep syncing, so data is never stranded behind a license check.
 
 ## Not covered
 
-- Removing the old copy after a passphrase change: the store has no delete, so that is done with
-  the provider.
+- Removing the old copy after a passphrase change: it stays in the cloud until you delete it
+  with the provider.
 - A provider can still delete data or roll a world back; encryption protects privacy and
   detects modification, not availability. WorldHop notices missing or rolled-back data on any
   computer that had seen it, and stops until you choose (see below), but it cannot prevent or

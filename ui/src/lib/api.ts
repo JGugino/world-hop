@@ -148,6 +148,30 @@ export type Snapshot = {
 };
 
 /**
+ * A version of a world the cloud still holds (a "cloud snapshot"), newest first.
+ */
+export type CloudVersion = {
+	id: string;
+	createdAt: string;
+	/** Pushed from this computer. */
+	mine: boolean;
+	/** The newest version, which other computers pull. */
+	current: boolean;
+	files: number;
+	size: number;
+};
+
+/**
+ * The Settings tab: how many versions of each world the cloud keeps, and the
+ * allowed range.
+ */
+export type Settings = {
+	cloudSnapshots: number;
+	minCloudSnapshots: number;
+	maxCloudSnapshots: number;
+};
+
+/**
  * The license state shown on the License tab.
  */
 export type License = {
@@ -284,6 +308,27 @@ export const getSnapshots = (id: string) =>
  */
 export const restoreSnapshot = (id: string, snapshot: string) =>
 	call<void>('POST', `/api/worlds/${encodeURIComponent(id)}/restore`, { snapshot });
+/**
+ * Lists the versions of a world the cloud holds, newest first.
+ */
+export const getCloudVersions = (id: string) =>
+	call<CloudVersion[]>('GET', `/api/worlds/${encodeURIComponent(id)}/versions`);
+/**
+ * Puts an older cloud version on this computer as the world (the current one is
+ * snapshotted first). The next sync uploads it as a new version.
+ */
+export const restoreCloudVersion = (id: string, version: string) =>
+	call<void>('POST', `/api/worlds/${encodeURIComponent(id)}/restore-version`, { version });
+
+/**
+ * The app settings.
+ */
+export const getSettings = () => call<Settings>('GET', '/api/settings');
+/**
+ * Saves how many versions of each world the cloud keeps.
+ */
+export const saveSettings = (cloudSnapshots: number) =>
+	call<Settings>('PUT', '/api/settings', { cloudSnapshots });
 
 /**
  * Lists worlds that are in the cloud but not on this computer.

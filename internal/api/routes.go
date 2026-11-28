@@ -33,7 +33,10 @@ var _ SourceStore = (*config.Config)(nil)
 // Deps are the collaborators the settings endpoints need. Nil fields fall back
 // to inert behaviour (no sources, stub providers).
 type Deps struct {
-	Sources   SourceStore
+	Sources SourceStore
+	// Settings is the "snapshots kept in the cloud" setting. Nil means it cannot
+	// be changed (the endpoints then report 501).
+	Settings  SettingsStore
 	Providers Providers
 	License   Licenser
 	// Encryption is the client-side encryption settings. Nil when the build
@@ -45,6 +48,15 @@ type Deps struct {
 	// Updates reports whether a newer release exists. Nil means no checking.
 	Updates Updater
 }
+
+// SettingsStore holds the app settings that are not about one feature. *config.Config
+// implements it.
+type SettingsStore interface {
+	CloudSnapshots() int
+	SetCloudSnapshots(n int) error
+}
+
+var _ SettingsStore = (*config.Config)(nil)
 
 // Updater is the update notice the UI shows. *update.Checker implements it.
 type Updater interface {
@@ -169,6 +181,32 @@ func snapshotDTO(si sync.SnapshotInfo) SnapshotDTO {
 	return d
 }
 
+// CloudVersionDTO is a version the cloud holds, as the UI sees it.
+type CloudVersionDTO struct {
+	ID        string    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	Mine      bool      `json:"mine"`
+	Current   bool      `json:"current"`
+	Files     int       `json:"files"`
+	Size      int64     `json:"size"`
+}
+
+// SettingsDTO is the settings page's state: the current value and its bounds.
+type SettingsDTO struct {
+	CloudSnapshots    int `json:"cloudSnapshots"`
+	MinCloudSnapshots int `json:"minCloudSnapshots"`
+	MaxCloudSnapshots int `json:"maxCloudSnapshots"`
+}
+
+// settings reports the current settings (the defaults when nothing can be saved).
+func (s *Server) settings() SettingsDTO {
+	n := config.DefaultCloudSnapshots
+	if s.deps.Settings != nil {
+		n = s.deps.Settings.CloudSnapshots()
+	}
+	return SettingsDTO{n, config.MinCloudSnapshots, config.MaxCloudSnapshots}
+}
+
 // routes registers the settings and world endpoints: update info, sources, worlds
 // (status, sync, resolve, lost data, snapshots, restore, cloud-only worlds and
 // download),
@@ -280,6 +318,57 @@ func (s *Server) routes(mux *http.ServeMux) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("GET /api/worlds/{id}/versions", func(w http.ResponseWriter, r *http.Request) {
+		vs, err := s.svc.CloudVersions(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		out := make([]CloudVersionDTO, 0, len(vs))
+		for _, v := range vs {
+			out = append(out, CloudVersionDTO{v.Name, v.CreatedAt, v.Mine, v.Current, v.Files, v.Size})
+		}
+		writeJSON(w, out)
+	})
+	mux.HandleFunc("POST /api/worlds/{id}/restore-version", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Version string `json:"version"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		if err := s.svc.RestoreCloudVersion(r.Context(), r.PathValue("id"), body.Version); err != nil {
+			writeServiceErr(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, s.settings())
+	})
+	mux.HandleFunc("PUT /api/settings", func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Settings == nil {
+			writeErr(w, http.StatusNotImplemented, errors.New("settings can't be changed in this mode"))
+			return
+		}
+		var body struct {
+			CloudSnapshots int `json:"cloudSnapshots"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		if err := s.deps.Settings.SetCloudSnapshots(body.CloudSnapshots); err != nil {
+			if errors.Is(err, config.ErrCloudSnapshots) {
+				writeErr(w, http.StatusBadRequest, err)
+			} else {
+				writeServiceErr(w, err)
+			}
+			return
+		}
+		writeJSON(w, s.settings())
 	})
 
 	s.encryptionRoutes(mux)
@@ -444,10 +533,10 @@ func writeServiceErr(w http.ResponseWriter, err error) {
 	var ce *sync.ConflictError
 	var le *sync.LostError
 	switch {
-	case errors.Is(err, sync.ErrUnknownWorld), errors.Is(err, sync.ErrNotInStore), errors.Is(err, ErrUnknownProvider), errors.Is(err, os.ErrNotExist):
+	case errors.Is(err, sync.ErrUnknownWorld), errors.Is(err, sync.ErrNotInStore), errors.Is(err, sync.ErrNoSuchVersion), errors.Is(err, ErrUnknownProvider), errors.Is(err, os.ErrNotExist):
 		writeErr(w, http.StatusNotFound, err)
 	case errors.Is(err, sync.ErrBadStrategy), errors.Is(err, sync.ErrBadTarget), errors.Is(err, sync.ErrBadLostAction),
-		errors.Is(err, sync.ErrCannotAccept), errors.Is(err, sync.ErrNoLocalCopy):
+		errors.Is(err, sync.ErrCannotAccept), errors.Is(err, sync.ErrNoLocalCopy), errors.Is(err, sync.ErrCurrentVersion):
 		writeErr(w, http.StatusBadRequest, err)
 	case errors.Is(err, sync.ErrNotLost):
 		writeErr(w, http.StatusConflict, err)

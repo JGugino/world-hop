@@ -357,6 +357,37 @@ func (s *Store) GetManifest(ctx context.Context, world, name string) ([]byte, er
 	return s.get(ctx, manifestKey(world, name))
 }
 
+var _ store.Remover = (*Store)(nil)
+
+// DeletePack removes a pack object. S3 answers 204 whether or not it existed.
+func (s *Store) DeletePack(ctx context.Context, name string) error {
+	if !store.ValidPackName(name) {
+		return fmt.Errorf("s3: bad pack name %q", name)
+	}
+	return s.remove(ctx, packKey(name))
+}
+
+// DeleteManifest removes a manifest object.
+func (s *Store) DeleteManifest(ctx context.Context, world, name string) error {
+	if !manifest.ValidID(world) || !store.ValidManifestName(name) {
+		return fmt.Errorf("s3: bad manifest name %q/%q", world, name)
+	}
+	return s.remove(ctx, manifestKey(world, name))
+}
+
+// remove deletes one object; one that is already gone (404) is fine.
+func (s *Store) remove(ctx context.Context, key string) error {
+	resp, err := s.do(ctx, "DELETE", s.key(key), nil, nil, nil)
+	if err != nil {
+		return err
+	}
+	if ok(resp) || resp.StatusCode == http.StatusNotFound {
+		resp.Body.Close()
+		return nil
+	}
+	return readError(resp)
+}
+
 // listResult is the part of an S3 ListObjectsV2 response this package reads.
 type listResult struct {
 	IsTruncated bool   `xml:"IsTruncated"`
