@@ -336,14 +336,13 @@ Unit and integration tests live beside each package. `internal/store/storetest` 
 
 From the code and docs:
 
-- A passphrase change copies the data to a new layout; the old encrypted copy stays in the cloud (no delete) and older versions' packs are not carried over. Another computer that syncs while a change runs can push into the old layout after the last catch-up pass; that version stays in the old copy, and that computer sees a local change to upload (or a conflict to resolve) after it unlocks.
-- Deletion and rollback are detected only by a computer that had seen what is missing, and lost packs only when something is pushed or pulled (see 3.10). Encryption detects modification of what is stored; a provider can still delete data, and the app can warn but cannot prevent or undo it.
-- No cloud cleanup: old manifests and packs are never deleted (the store has no delete), so cloud usage only grows. The app cannot remove a plaintext copy after encryption is enabled.
-- Snapshots are local only (newest 5 per world).
-- No code signing (Windows SmartScreen warning) and no macOS notarization. No MSI or AppImage.
-- No macOS release has been produced from this repository's tooling yet; it must be built on a Mac.
-- Unlinking removes the stored tokens locally; the code does not revoke them with the provider.
-- Manual testing on real Windows and macOS with an open world, and with real Google and S3 accounts, is still owed.
+1. A passphrase change copies the data to a new layout; the old encrypted copy stays in the cloud (no delete) and older versions' packs are not carried over. Another computer that syncs while a change runs can push into the old layout after the last catch-up pass; that version stays in the old copy, and that computer sees a local change to upload (or a conflict to resolve) after it unlocks.
+2. Deletion and rollback are detected only by a computer that had seen what is missing, and lost packs only when something is pushed or pulled (see 3.10). Encryption detects modification of what is stored; a provider can still delete data, and the app can warn but cannot prevent or undo it.
+3. No cloud cleanup: old manifests and packs are never deleted (the store has no delete), so cloud usage only grows. The app cannot remove a plaintext copy after encryption is enabled.
+4. Snapshots are local only (newest 5 per world).
+5. No code signing (Windows SmartScreen warning) and no macOS notarization.
+6. Unlinking removes the stored tokens locally; the code does not revoke them with the provider.
+7. Manual testing on real Windows and macOS with an open world, and with real Google and S3 accounts, is still owed.
 
 Further features are planned but not built; they are not tracked in this repo.
 
