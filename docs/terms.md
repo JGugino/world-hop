@@ -32,7 +32,7 @@ storage that **you** own (Google Drive or, with Pro, an S3 bucket). We do not ho
   terms, and refunds follow Gumroad's and our posted refund policy. A refunded or charged-back
   purchase stops being valid and the key may be rejected. If WorldHop cannot reach Gumroad, Pro
   keeps working for a grace period and then returns to the free version until it can verify again.
-  Your worlds and cloud data are never deleted when Pro lapses.
+  Nothing is deleted because Pro lapses. (WorldHop's routine removal of old versions applies to every user; see the privacy policy.)
 - Pro features may be added to or changed over time. We may change future prices.
 
 ## 3. Your accounts and your data

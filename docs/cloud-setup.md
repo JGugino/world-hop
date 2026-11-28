@@ -84,7 +84,8 @@ with a provider; the user enters their own details on the **Cloud account** page
   only the non-secret settings are written to `s3.json` in the state directory.
 
 **Test connection** lists the bucket with the entered details without saving anything. The key needs
-list, read and write permission on the bucket. Objects use the same layout as the Google Drive
+list, read, write and delete permission on the bucket (delete is used to remove old versions; without
+it syncing works but cleanup fails, and the failure is only logged). Objects use the same layout as the Google Drive
 store (`packs/<sha256>`, `worlds/<id>/manifest-….json`) under the optional folder.
 
 Pro gating uses the license check in `internal/license` (see docs/licensing.md): saving, testing, choosing

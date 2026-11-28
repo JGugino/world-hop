@@ -4,7 +4,7 @@ title: WorldHop Privacy Policy
 
 # WorldHop Privacy Policy
 
-**Effective date:** November 26, 2026
+**Effective date:** November 28, 2026
 **Operator:** Gugino Software Solutions ("we", "us")
 **Contact:** gugino@gugino.org
 
@@ -27,6 +27,12 @@ and the services you choose.
 | S3 access keys (Pro, if you use S3) | Your operating system's keychain | To reach your bucket |
 | Encryption passphrase (Pro, optional) | Never stored. If you tick "remember", only a derived key is kept in your keychain | To encrypt before upload |
 | Pro license key | On your computer, and sent to Gumroad to verify it (see section 3) | To unlock Pro |
+
+WorldHop also **deletes data in your own storage**, only data it put there. About once a day,
+after a successful sync, it removes old versions of your worlds (it keeps the newest few, five by
+default, and everything from the last 14 days) and the files only those old versions used. If you
+turn encryption on, it removes the unencrypted copy of a world once the encrypted copy is in place.
+It never deletes anything on your computer this way and never touches files that are not its own.
 
 ## 2. Google user data
 
@@ -94,6 +100,8 @@ recovered.** See [encryption.md](encryption.md) for details.
   your keychain. It does not delete data already in the cloud.
 - **Revoke Google access:** open your [Google Account permissions](https://myaccount.google.com/permissions),
   choose WorldHop, and select **Delete all connections** (or **Remove access**).
+- **Old versions:** WorldHop removes them from your storage by itself, as described in section 1.
+  You can keep more of them (up to 50) under Settings in the WorldHop web view.
 - **Delete the synced data from Google Drive:** in
   [Google Drive settings](https://drive.google.com/drive/settings) go to **Manage apps**, find
   WorldHop and choose **Options > Delete hidden app data**.
