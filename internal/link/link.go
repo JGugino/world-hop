@@ -541,6 +541,34 @@ func (m *Manager) ListWorlds(ctx context.Context) ([]string, error) {
 	return l, m.wrap(id, err)
 }
 
+var _ store.Remover = (*Manager)(nil)
+
+// DeletePack removes a pack on the chosen provider, if it can delete.
+func (m *Manager) DeletePack(ctx context.Context, name string) error {
+	s, id, err := m.current()
+	if err != nil {
+		return err
+	}
+	rm, ok := s.(store.Remover)
+	if !ok {
+		return store.ErrUnsupported
+	}
+	return m.wrap(id, rm.DeletePack(ctx, name))
+}
+
+// DeleteManifest removes a manifest on the chosen provider, if it can delete.
+func (m *Manager) DeleteManifest(ctx context.Context, world, name string) error {
+	s, id, err := m.current()
+	if err != nil {
+		return err
+	}
+	rm, ok := s.(store.Remover)
+	if !ok {
+		return store.ErrUnsupported
+	}
+	return m.wrap(id, rm.DeleteManifest(ctx, world, name))
+}
+
 // NotConfiguredError means this build has no OAuth client ID for the provider.
 // Its message is aimed at developers: end users of a release build never see it.
 type NotConfiguredError struct{ Provider, Hint string }

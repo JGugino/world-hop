@@ -434,6 +434,36 @@ func (s *Store) MissingPacks(ctx context.Context, names []string) ([]string, err
 	return out, nil
 }
 
+var _ store.Remover = (*Store)(nil)
+
+// DeletePack removes a pack by its plaintext name; the inner store holds it under
+// the keyed name. Only this key's own pack can be named this way, so deleting never
+// reaches another layout's data.
+func (s *Store) DeletePack(ctx context.Context, name string) error {
+	rm, ok := s.Inner.(store.Remover)
+	if !ok {
+		return store.ErrUnsupported
+	}
+	if !store.ValidPackName(name) {
+		return fmt.Errorf("crypt: bad pack name")
+	}
+	return rm.DeletePack(ctx, s.packName(name))
+}
+
+// DeleteManifest removes a manifest of a world. The index entry that lets
+// ListWorlds find the world is left alone: cleanup never removes a world's last
+// manifest.
+func (s *Store) DeleteManifest(ctx context.Context, worldID, name string) error {
+	rm, ok := s.Inner.(store.Remover)
+	if !ok {
+		return store.ErrUnsupported
+	}
+	if !manifest.ValidID(worldID) || !store.ValidManifestName(name) {
+		return fmt.Errorf("crypt: bad world id or manifest name")
+	}
+	return rm.DeleteManifest(ctx, s.worldID(worldID), name)
+}
+
 // indexEntry is the plaintext of one entry of the index of worlds: the real world
 // id, sealed before it is stored, so the provider sees only hashed ids.
 type indexEntry struct {

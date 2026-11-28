@@ -129,8 +129,9 @@ func (s *Store) download(ctx context.Context, f file) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// delete removes a Drive file. The only caller is PutPack clearing a junk file whose
-// size doesn't match its content-addressed name; WorldHop never deletes real data.
+// delete removes a Drive file. Callers are PutPack (clearing a junk file whose size
+// doesn't match its content-addressed name) and cloud cleanup (DeletePack and
+// DeleteManifest).
 func (s *Store) delete(ctx context.Context, id string) error {
 	resp, err := s.c.Do(ctx, func() (*http.Request, error) {
 		return http.NewRequest("DELETE", s.APIBase+"/drive/v3/files/"+url.PathEscape(id), nil)
@@ -311,6 +312,38 @@ func (s *Store) GetManifest(ctx context.Context, world, name string) ([]byte, er
 		return nil, store.ErrNotFound
 	}
 	return s.download(ctx, fs[0])
+}
+
+var _ store.Remover = (*Store)(nil)
+
+// DeletePack removes every Drive file named for the pack (Drive allows duplicates).
+func (s *Store) DeletePack(ctx context.Context, name string) error {
+	if !store.ValidPackName(name) {
+		return fmt.Errorf("gdrive: bad pack name %q", name)
+	}
+	return s.deleteNamed(ctx, packFile(name))
+}
+
+// DeleteManifest removes every Drive file named for the manifest.
+func (s *Store) DeleteManifest(ctx context.Context, world, name string) error {
+	if !manifest.ValidID(world) || !store.ValidManifestName(name) {
+		return fmt.Errorf("gdrive: bad manifest name %q/%q", world, name)
+	}
+	return s.deleteNamed(ctx, manifestFile(world, name))
+}
+
+// deleteNamed deletes all files with an exact name; none is fine.
+func (s *Store) deleteNamed(ctx context.Context, name string) error {
+	fs, err := s.byName(ctx, name)
+	if err != nil {
+		return err
+	}
+	for _, f := range fs {
+		if err := s.delete(ctx, f.ID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ListWorlds finds every manifest in the app folder and groups them by world.

@@ -14,10 +14,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	stdsync "sync"
 	"time"
 
+	"github.com/JGugino/world-hopper/internal/store"
 	"github.com/JGugino/world-hopper/internal/worlds"
 )
 
@@ -76,6 +78,8 @@ type Runner struct {
 	// computer has never had, when there is exactly one saves folder to put
 	// them in. It only ever creates new folders.
 	AutoDownload bool
+
+	plainChecked time.Time // when maintain last looked for a plaintext copy (guarded by pass)
 
 	pass   stdsync.Mutex // one sync pass at a time
 	mu     stdsync.Mutex
@@ -171,7 +175,6 @@ func (r *Runner) runPass(ctx context.Context, ws []worlds.World, full bool) Runn
 	out := r.run(ctx, ws, full)
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	now := time.Now()
 	r.status.State = "idle"
 	r.status.Progress = nil
@@ -185,7 +188,58 @@ func (r *Runner) runPass(ctx context.Context, ws []worlds.World, full bool) Runn
 	r.status.Result = out.result
 	r.status.Problems = out.problems
 	r.status.Warnings = out.warnings
-	return r.status
+	st := r.status
+	r.mu.Unlock()
+
+	// Housekeeping runs after the result is shown (the pass lock is still held, so
+	// no sync overlaps it) and only when the pass went well: a cloud that is
+	// misbehaving is no time to delete from it.
+	if full && out.outcome == "ok" && ctx.Err() == nil {
+		r.maintain(ctx)
+	}
+	return st
+}
+
+// PlaintextRemover is implemented by the store when encryption can be turned on:
+// it removes the unencrypted copy of worlds whose encrypted copy is in place (see
+// crypt.Manager.RemovePlaintext).
+type PlaintextRemover interface {
+	// RemovePlaintext returns how many worlds' plaintext copies it removed.
+	RemovePlaintext(ctx context.Context) (removed int, err error)
+}
+
+// plaintextEvery limits how often a computer looks for a plaintext copy to remove:
+// the answer rarely changes, and looking costs a listing request.
+const plaintextEvery = time.Hour
+
+// maintain does the cloud housekeeping that a good pass allows: removing the
+// plaintext copy once encryption holds its replacement, and deleting old versions
+// of worlds (at most daily, see Engine.Cleanup). Failures are logged and retried
+// later; they never turn a good sync into a problem.
+func (r *Runner) maintain(ctx context.Context) {
+	e := r.engine
+	if pr, ok := e.Store.(PlaintextRemover); ok && time.Since(r.plainChecked) >= plaintextEvery {
+		r.plainChecked = time.Now()
+		if n, err := pr.RemovePlaintext(ctx); err != nil && !errors.Is(err, store.ErrUnsupported) {
+			log.Printf("remove unencrypted copy: %v", err)
+		} else if n > 0 {
+			log.Printf("removed the unencrypted copy of %d world(s) from the cloud", n)
+		}
+	}
+	if !e.CleanupDue() || ctx.Err() != nil {
+		return
+	}
+	res, err := e.Cleanup(ctx)
+	switch {
+	case errors.Is(err, store.ErrUnsupported):
+	case err != nil:
+		log.Printf("cloud cleanup: %v", err)
+	case res.Manifests > 0:
+		log.Printf("cloud cleanup removed %d old version(s) and %d pack(s) of %d world(s)", res.Manifests, res.Packs, res.Worlds)
+	}
+	if ctx.Err() == nil {
+		e.MarkCleaned()
+	}
 }
 
 // passOutcome is what one pass found.

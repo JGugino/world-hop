@@ -359,5 +359,36 @@ func TestUnlinkReportsWhetherAccessWasRevoked(t *testing.T) {
 		if w.Code != 200 || !strings.Contains(w.Body.String(), tc.want) {
 			t.Fatalf("%d %s, want %s", w.Code, w.Body, tc.want)
 		}
+func TestCloudSnapshotsSettingAPI(t *testing.T) {
+	dir := t.TempDir()
+	cfg, _, _ := config.Load(filepath.Join(dir, "cfg.json"))
+	eng, err := sync.New(localdir.New(filepath.Join(dir, "shared")), filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := sync.NewRunner("t", eng, func() []worlds.World { return nil })
+	h := (&Server{svc: svc, deps: Deps{Settings: cfg}, assets: fstest.MapFS{"index.html": {Data: []byte("hi")}}}).Handler()
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Host = "127.0.0.1:1"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := do("GET", "/api/settings", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"cloudSnapshots":5`) ||
+		!strings.Contains(w.Body.String(), `"minCloudSnapshots":2`) {
+		t.Fatalf("defaults: %d %s", w.Code, w.Body)
+	}
+	if w := do("PUT", "/api/settings", `{"cloudSnapshots":1}`); w.Code != 400 {
+		t.Fatalf("below the minimum: %d", w.Code)
+	}
+	if w := do("PUT", "/api/settings", `{"cloudSnapshots":6}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"cloudSnapshots":6`) {
+		t.Fatalf("set: %d %s", w.Code, w.Body)
+	}
+	if cfg.CloudSnapshots() != 6 {
+		t.Fatal("the setting was not stored")
+	}
+	if w := do("GET", "/api/worlds/nope/versions", ""); w.Code != 404 {
+		t.Fatalf("versions of an unknown world: %d", w.Code)
 	}
 }

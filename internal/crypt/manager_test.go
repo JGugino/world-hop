@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/JGugino/world-hopper/internal/manifest"
 	"github.com/JGugino/world-hopper/internal/store/localdir"
 	"github.com/JGugino/world-hopper/internal/sync"
 )
@@ -151,4 +152,117 @@ func TestExistingPlainDataIsMigrated(t *testing.T) {
 			t.Fatalf("reserved id leaked into world list: %v", ids)
 		}
 	}
+}
+
+// Turning encryption on leaves the unencrypted copy behind; RemovePlaintext deletes
+// it once the encrypted layout holds the world, and not before.
+func TestPlaintextCopyIsRemovedOnlyOnceReplaced(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	inner := localdir.New(root)
+	m, _ := NewManager(inner, t.TempDir(), nil, func() bool { return true })
+	m.Params = fast
+	e, _ := sync.New(m, t.TempDir())
+	e.StateScope = m.Scope
+	w := world(t, "v1")
+	if _, err := e.Push(ctx, w); err != nil { // plaintext
+		t.Fatal(err)
+	}
+	// A second world only exists in the clear in the cloud: no encrypted copy, so
+	// it must survive every run below.
+	w2 := world(t, "other")
+	w2.ID, w2.Name = "W2", "W2"
+	if _, err := e.Push(ctx, w2); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Enable(ctx, pass, pass, true, false); err != nil {
+		t.Fatal(err)
+	}
+	plainManifests := func() int {
+		ents, _ := os.ReadDir(filepath.Join(root, "worlds", w.ID))
+		return len(ents)
+	}
+	packCount := func() int { ents, _ := os.ReadDir(filepath.Join(root, "packs")); return len(ents) }
+	plainPacks := packCount()
+
+	// Not yet encrypted: nothing may be removed.
+	if n, err := m.RemovePlaintext(ctx); err != nil || n != 0 || plainManifests() != 1 || packCount() != plainPacks {
+		t.Fatalf("removed before replaced: %d %v", n, err)
+	}
+	if _, err := e.Push(ctx, w); err != nil { // encrypted
+		t.Fatal(err)
+	}
+	encPacks := packCount() - plainPacks
+	w2Packs := len(packsOf(t, inner, "W2"))
+	if encPacks == 0 {
+		t.Fatal("test setup: encrypted push stored nothing")
+	}
+	n, err := m.RemovePlaintext(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("remove: %d %v", n, err)
+	}
+	if plainManifests() != 0 || packCount() != encPacks+w2Packs {
+		t.Fatalf("plaintext left: %d manifests, %d packs (encrypted %d, kept %d)", plainManifests(), packCount(), encPacks, w2Packs)
+	}
+	// The encrypted copy is untouched and still syncs.
+	if st, err := e.Status(ctx, w); err != nil || st != sync.StatusSynced {
+		t.Fatalf("after removal: %s %v", st, err)
+	}
+	b, _ := sync.New(m, t.TempDir())
+	b.StateScope = m.Scope
+	dl := filepath.Join(t.TempDir())
+	if _, err := b.Download(ctx, w.ID, dl); err != nil {
+		t.Fatalf("download of the encrypted copy: %v", err)
+	}
+	// Again: nothing more to do, and the world with no encrypted copy is intact.
+	if n, err := m.RemovePlaintext(ctx); err != nil || n != 0 {
+		t.Fatalf("second run: %d %v", n, err)
+	}
+	if ents, _ := os.ReadDir(filepath.Join(root, "worlds", "W2")); len(ents) != 1 {
+		t.Fatal("a world with no encrypted copy lost its plaintext copy")
+	}
+	if _, err := inner.GetPack(ctx, mustPack(t, inner, "W2")); err != nil {
+		t.Fatalf("W2's pack was removed: %v", err)
+	}
+	// While locked it does nothing.
+	m.Lock()
+	if n, err := m.RemovePlaintext(ctx); err != nil || n != 0 {
+		t.Fatalf("locked: %d %v", n, err)
+	}
+}
+
+// packsOf lists the packs a plaintext world's manifests point at.
+func packsOf(t *testing.T, st *localdir.Dir, id string) []string {
+	t.Helper()
+	ctx := context.Background()
+	names, _ := st.ListManifests(ctx, id)
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range names {
+		b, err := st.GetManifest(ctx, id, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mf, err := manifest.Parse(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range mf.Chunks {
+			if !seen[c.Pack] {
+				seen[c.Pack] = true
+				out = append(out, c.Pack)
+			}
+		}
+	}
+	return out
+}
+
+// mustPack returns one pack of a plaintext world.
+func mustPack(t *testing.T, st *localdir.Dir, id string) string {
+	t.Helper()
+	p := packsOf(t, st, id)
+	if len(p) == 0 {
+		t.Fatalf("%s has no packs", id)
+	}
+	return p[0]
 }

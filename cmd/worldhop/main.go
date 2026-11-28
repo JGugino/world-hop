@@ -155,6 +155,7 @@ func main() {
 	}
 	det := detect.New()
 	engine.IsOpen = det.WorldOpen
+	engine.CloudKeep = cfg.CloudSnapshots
 	svc := sync.NewRunner(version, engine, listWorlds)
 	svc.Limited = lic.Limited
 	// Re-check a stored Pro key now and then (refunds, offline grace).
@@ -193,7 +194,7 @@ func main() {
 	upd := update.New(version, sd)
 	upd.OnChange = func(i update.Info) { tray.SetUpdate(i.Latest, i.URL) }
 	go upd.Run(context.Background())
-	deps := api.Deps{Sources: cfg, Providers: api.StubProviders{}, License: lic, Encryption: encStore, Updates: upd} // -store mode has no cloud accounts
+	deps := api.Deps{Sources: cfg, Settings: cfg, Providers: api.StubProviders{}, License: lic, Encryption: encStore, Updates: upd} // -store mode has no cloud accounts
 	if cloud != nil {
 		deps.Providers, deps.ObjectStorage = link.API{M: cloud}, link.API{M: cloud}
 	}

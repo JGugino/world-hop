@@ -140,6 +140,10 @@ Before a sync replaces a world on your computer, WorldHop saves the old version 
 
 Restoring saves your current version as a snapshot first, so a restore can be undone. The restored world is uploaded on the next sync.
 
+### Snapshots in the cloud
+
+Every upload is also kept in your cloud storage as a version. Under **Snapshots** on a world, the **In the cloud** list shows them; **Restore** puts one on this computer (your current world is saved as a snapshot first, and the next sync uploads the restored copy as a new version). On the **Settings** tab you choose how many of the newest versions of each world the cloud keeps: 5 by default, at least 2. Older ones are removed to free space (at most once a day), but anything uploaded in the last 14 days is always kept.
+
 ## 9. WorldHop Pro
 
 | | Free | Pro |
