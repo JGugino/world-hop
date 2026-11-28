@@ -190,7 +190,7 @@ Optionally tick **Remember on this computer** to store the key in your system ke
 
 To change it, open the **Encryption** tab and choose **Change passphrase**. Enter the current passphrase and the new one twice. WorldHop then re-encrypts all your worlds with the new passphrase and shows its progress; syncing on this computer pauses until it finishes, and stopping it midway changes nothing. Try not to sync from your other computers meanwhile. Afterwards, each other computer asks for the **new** passphrase. The previous encrypted copy stays in your cloud account and can still be opened with the old passphrase; WorldHop cannot delete it, so remove it with your cloud provider if the old passphrase was exposed.
 
-Turning encryption on uploads encrypted copies beside your existing ones. WorldHop cannot delete the old unencrypted copies, so delete them yourself in your cloud account if you want them gone (Google Drive: Settings, Manage apps, WorldHop, Delete hidden app data).
+Turning encryption on uploads encrypted copies beside your existing ones. Once a world's encrypted copy is in place, WorldHop deletes that world's old unencrypted copy from your cloud storage by itself (after a sync, within the hour). A world that has no encrypted copy yet keeps its unencrypted copy until a computer that has it syncs. To remove everything at once, delete the hidden app data in your cloud account (Google Drive: Settings, Manage apps, WorldHop, Delete hidden app data) and sync again.
 
 ## 10. Updates
 

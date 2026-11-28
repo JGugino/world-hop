@@ -23,6 +23,9 @@ you left on one computer is waiting for you on the next.
 - **Safe by default.** WorldHop never syncs a world while Minecraft has it open, and it saves a snapshot before it overwrites anything, so you can always restore.
 - **Works with your launcher.** Vanilla, Prism, MultiMC, CurseForge and Modrinth worlds, or any folder you point it at.
 - **Stays out of your way.** There is no big desktop window. Click the tray icon and choose **Open Web View** when you want to look around.
+- **Keeps a history, and tidies it.** Every upload is kept as a version in your cloud. Browse them and restore an older one, and WorldHop removes old versions on its own (you choose how many to keep, 5 by default).
+- **Notices when your cloud loses something.** If the cloud deletes or rolls back a world, WorldHop stops and lets you choose, instead of quietly overwriting your newer copy.
+- **Disconnecting really disconnects.** Disconnecting Google Drive revokes WorldHop's access at Google, not just on your computer.
 
 ## How it works
 
@@ -43,17 +46,35 @@ If the same world was changed on two computers at once, WorldHop never guesses. 
 
 ## Free vs Pro
 
+**Get WorldHop Pro at [store.gugino.org](https://store.gugino.org).** It is a one-time purchase, with no subscription.
+
 | | Free | Pro |
 |---|---|---|
 | Worlds synced | 1 | Unlimited |
 | Google Drive storage | ✅ | ✅ |
 | Your own S3-compatible bucket (AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO) | | ✅ |
 | Client-side encryption (your cloud provider only sees scrambled data) | | ✅ |
-| Snapshots and restore | ✅ | ✅ |
+| Snapshots and restore, on your computer and from your cloud's version history | ✅ | ✅ |
+| Automatic cleanup of old cloud versions (you set how many to keep) | ✅ | ✅ |
+| Detects cloud data that went missing or was rolled back | ✅ | ✅ |
+| Conflict tools (keep this computer's, the cloud's, the newest, or both) | ✅ | ✅ |
+| Change your encryption passphrase later, and remove the old unencrypted copy automatically | | ✅ |
 
-Pro is a one-time purchase on Gumroad. After buying you get a license key by email; paste it into
-the **License** tab in WorldHop. See [docs/licensing.md](docs/licensing.md) for the details,
+Pro is a one-time purchase on Gumroad, from [store.gugino.org](https://store.gugino.org). After
+buying you get a license key by email; paste it into the **License** tab in WorldHop. See [docs/licensing.md](docs/licensing.md) for the details,
 including pricing and how license checks work.
+
+## What's new in 0.2
+
+- **Cloud version history.** Every upload is kept as a version. Open **Snapshots** on a world and use the **In the cloud** list to restore an older one (your current world is saved as a snapshot first).
+- **Automatic cleanup.** Old versions and the data only they used are removed from your cloud about once a day, so storage stops growing. The **Settings** tab sets how many of the newest versions to keep (5 by default, 2 to 50), and anything from the last 14 days is always kept.
+- **Protection from a misbehaving cloud.** If your provider deletes or rolls back a world, WorldHop stops syncing it and asks whether to use the cloud as it is now or upload this computer's copy. It never repairs anything on its own.
+- **Revoke on disconnect.** Disconnecting Google Drive asks Google to end WorldHop's access. For S3, WorldHop tells you which access key to delete in your storage service, since it cannot cancel keys itself.
+- **Encryption (Pro):** you can change your passphrase (everything is re-encrypted in the background), and the old unencrypted copy of a world is removed once its encrypted copy is in place.
+- **S3 users:** the access key now needs delete permission (`s3:DeleteObject` on AWS) so old versions can be cleaned up.
+- **Linux:** a `.deb` that adds WorldHop to your application menu, and a tarball that unpacks to `worldhop`.
+
+See the [release notes](docs/release-notes/v0.2.0.md) for details.
 
 ## A look around
 
@@ -73,7 +94,7 @@ including pricing and how license checks work.
 1. Download the installer for your system from the [Releases](https://github.com/JGugino/world-hop/releases) page:
    - **Windows:** unzip `WorldHop-<version>-windows-amd64.zip` and run `worldhop.exe`.
    - **macOS:** open `WorldHop-<version>.dmg` and drag `WorldHop.app` out. It is not code-signed yet, so on first launch right-click it and choose **Open**. It lives in the menu bar.
-   - **Linux:** install the `.deb`, or unpack the `.tar.gz`. The tray needs a desktop with AppIndicator support.
+   - **Linux:** install the `.deb` (`sudo apt install ./worldhop_<version>_amd64.deb`), or unpack the `.tar.gz` and run `worldhop`. The tray needs a desktop with AppIndicator support (on GNOME, the `gnome-shell-extension-appindicator` extension).
 2. Click the WorldHop icon in your tray and choose **Open Web View**.
 3. Go to **Cloud account** and click **Connect** on Google Drive.
 4. Go to **Saves** and add your saves folder.
@@ -131,9 +152,9 @@ Never commit real IDs. Pushing a `v*` tag runs the `release` workflow, which bui
 | `internal/worlds` | Finds worlds (vanilla, Prism, MultiMC, CurseForge, Modrinth, custom) |
 | `internal/chunker`, `internal/manifest` | Content-defined chunking and the manifest format |
 | `internal/store` | Storage interface; local folder, Google Drive and S3 backends |
-| `internal/sync` | Push, pull, atomic swap, snapshots, conflicts |
+| `internal/sync` | Push, pull, atomic swap, snapshots, conflicts, cloud versions and cleanup, lost-data detection |
 | `internal/detect` | Detects whether Minecraft is running or a world is locked |
-| `internal/crypt` | Client-side encryption |
+| `internal/crypt` | Client-side encryption, passphrase change, removing the unencrypted copy |
 | `internal/license` | Gumroad license checks |
 | `ui/` | SvelteKit web view |
 
