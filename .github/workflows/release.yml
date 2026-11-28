@@ -1,9 +1,13 @@
 name: release
 
 # Tag vX.Y.Z to build installers and attach them to a GitHub release.
-# Repository secrets (never commit these):
+# Repository secrets (never commit these), created under
+# Settings > Secrets and variables > Actions > Repository secrets, with
+# exactly these names:
 #   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (optional), GUMROAD_PRODUCT_ID,
 #   PURCHASE_URL (optional).
+# Secrets stored in an Environment, or as Variables, are not visible to these
+# jobs (they have no `environment:` key and read only `secrets.*`).
 on:
   push:
     tags: ["v*"]
@@ -44,6 +48,17 @@ jobs:
       GUMROAD_PRODUCT_ID: ${{ secrets.GUMROAD_PRODUCT_ID }}
       PURCHASE_URL: ${{ secrets.PURCHASE_URL }}
     steps:
+      - name: Check required secrets
+        shell: bash
+        run: |
+          missing=0
+          for name in GOOGLE_CLIENT_ID GUMROAD_PRODUCT_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing secret::$name is empty. Add it as a repository secret named exactly $name (Settings > Secrets and variables > Actions > Repository secrets). Environment secrets and Variables are not passed to this job."
+              missing=1
+            fi
+          done
+          exit $missing
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
