@@ -333,3 +333,31 @@ func TestLostWorldAPI(t *testing.T) {
 		t.Fatalf("unknown world: %d", w.Code)
 	}
 }
+
+// unlinkProviders answers Unlink with a fixed result, to check what the API returns.
+type unlinkProviders struct {
+	StubProviders
+	res UnlinkResult
+}
+
+func (u unlinkProviders) Unlink(context.Context, string) (UnlinkResult, error) { return u.res, nil }
+
+func TestUnlinkReportsWhetherAccessWasRevoked(t *testing.T) {
+	svc := sync.NewRunner("t", nil, func() []worlds.World { return nil })
+	for _, tc := range []struct {
+		res  UnlinkResult
+		want string
+	}{
+		{UnlinkResult{Revoked: true}, `{"revoked":true}`},
+		{UnlinkResult{Warning: "could not reach Google"}, `"revoked":false,"warning":"could not reach Google"`},
+	} {
+		h := (&Server{svc: svc, deps: Deps{Providers: unlinkProviders{res: tc.res}}, assets: fstest.MapFS{"index.html": {Data: []byte("hi")}}}).Handler()
+		r := httptest.NewRequest("POST", "/api/providers/gdrive/unlink", nil)
+		r.Host = "127.0.0.1:1"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 200 || !strings.Contains(w.Body.String(), tc.want) {
+			t.Fatalf("%d %s, want %s", w.Code, w.Body, tc.want)
+		}
+	}
+}

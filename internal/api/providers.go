@@ -45,8 +45,19 @@ type Providers interface {
 	List(ctx context.Context) []Provider
 	// Link starts the OAuth flow. The UI polls List to see it complete.
 	Link(ctx context.Context, id string) (LinkStart, error)
-	// Unlink forgets the stored credentials. Cloud data is left alone.
-	Unlink(ctx context.Context, id string) error
+	// Unlink forgets the stored credentials, after asking the provider to end
+	// WorldHop's access where it can. Cloud data is left alone.
+	Unlink(ctx context.Context, id string) (UnlinkResult, error)
+}
+
+// UnlinkResult says whether unlinking also ended WorldHop's access at the
+// provider. The credentials are forgotten on this computer either way.
+type UnlinkResult struct {
+	// Revoked: the provider confirmed the access ended.
+	Revoked bool `json:"revoked"`
+	// Warning, when revoking was tried and failed, tells the person how to remove
+	// the access themselves. Empty when there was nothing to revoke.
+	Warning string `json:"warning,omitempty"`
 }
 
 // StubProviders lists Google Drive as not yet available.
@@ -66,7 +77,9 @@ func (StubProviders) Link(_ context.Context, id string) (LinkStart, error) {
 }
 
 // Unlink always fails: there is nothing to unlink in this mode.
-func (StubProviders) Unlink(_ context.Context, id string) error { return stubErr(id) }
+func (StubProviders) Unlink(_ context.Context, id string) (UnlinkResult, error) {
+	return UnlinkResult{}, stubErr(id)
+}
 
 // stubErr returns the error for linking or unlinking in stub mode.
 func stubErr(id string) error {

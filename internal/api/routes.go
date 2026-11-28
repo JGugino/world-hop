@@ -425,11 +425,12 @@ func (s *Server) routes(mux *http.ServeMux) {
 		}
 	})
 	mux.HandleFunc("POST /api/providers/{id}/unlink", func(w http.ResponseWriter, r *http.Request) {
-		if err := s.providers().Unlink(r.Context(), r.PathValue("id")); err != nil {
+		res, err := s.providers().Unlink(r.Context(), r.PathValue("id"))
+		if err != nil {
 			writeServiceErr(w, err)
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(w, res)
 	})
 }
 

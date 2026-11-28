@@ -89,8 +89,9 @@ recovered.** See [encryption.md](encryption.md) for details.
 
 ## 5. Your choices: removing access and deleting data
 
-- **Disconnect in WorldHop:** use the unlink option for your cloud provider. This deletes the
-  stored tokens or keys from your keychain. It does not delete data already in the cloud.
+- **Disconnect in WorldHop:** use the unlink option for your cloud provider. This asks Google to
+  revoke WorldHop's access (when it can reach Google) and deletes the stored tokens or keys from
+  your keychain. It does not delete data already in the cloud.
 - **Revoke Google access:** open your [Google Account permissions](https://myaccount.google.com/permissions),
   choose WorldHop, and select **Delete all connections** (or **Remove access**).
 - **Delete the synced data from Google Drive:** in

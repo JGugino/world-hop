@@ -51,12 +51,16 @@ tab.
 		await load();
 	}
 
-	// disconnect forgets the stored sign-in or keys. Cloud data is left alone.
+	// disconnect forgets the stored sign-in or keys, and the server also asks the
+	// provider to end WorldHop's access. If that could not be done (offline) the
+	// sign-in is still forgotten, and the page says how to finish by hand. Cloud data
+	// is left alone.
 	async function disconnect(p: Provider) {
 		busy = p.id;
 		error = '';
 		try {
-			await unlinkProvider(p.id);
+			const res = await unlinkProvider(p.id);
+			if (res.warning) error = res.warning;
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
 		}
